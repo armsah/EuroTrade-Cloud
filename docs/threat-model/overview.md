@@ -633,14 +633,21 @@ Failure testing
 
 ## 15. Related Documents
 
-docs/architecture/overview.md
-docs/architecture/context.md
-docs/architecture/component.md
-docs/architecture/nfr.md
-docs/architecture/tenant-isolation.md
-docs/adr/0001-aks-vs-container-apps.md
-docs/adr/0002-service-bus-vs-event-hubs.md
-docs/adr/0003-postgresql-database.md
-docs/adr/0004-tenant-isolation.md
+### Architecture
+
+- [Architecture Overview](../architecture/overview.md)
+- [System Context](../architecture/context.md)
+- [Component Architecture](../architecture/component.md)
+- [Non-Functional Requirements](../architecture/nfr.md)
+- [Tenant Isolation Strategy](../architecture/tenant-isolation.md)
+
+### Architecture Decision Records
+
+- [ADR-0001 — AKS vs. Container Apps](../adr/0001-aks-vs-container-apps.md)
+- [ADR-0002 — Azure Service Bus vs. Event Hubs](../adr/0002-service-bus-vs-event-hubs.md)
+- [ADR-0003 — PostgreSQL Database Architecture](../adr/0003-postgresql-database.md)
+- [ADR-0004 — Tenant Isolation Strategy](../adr/0004-tenant-isolation.md)
+
+```
 
 ```
