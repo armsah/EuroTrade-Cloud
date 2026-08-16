@@ -150,4 +150,4 @@ AKS implementation phase.
 - `docs/architecture/overview.md`
 - `docs/architecture/context.md`
 - `docs/architecture/component.md`
-- `docs/architecture/nfr.md`
+- `docs/architecture/nfrs.md`
