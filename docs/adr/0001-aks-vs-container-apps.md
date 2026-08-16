@@ -1,4 +1,4 @@
-# ADR-001: Choose AKS over Azure Container Apps
+# ADR-0001: Choose AKS over Azure Container Apps
 
 ## Status
 
