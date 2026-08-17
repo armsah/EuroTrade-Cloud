@@ -1,6 +1,16 @@
 @EuroTrade.Api_HostAddress = http://localhost:5237
 
-GET {{EuroTrade.Api_HostAddress}}/weatherforecast/
+GET {{EuroTrade.Api_HostAddress}}/health
 Accept: application/json
 
 ###
+
+POST {{EuroTrade.Api_HostAddress}}/api/orders
+Content-Type: application/json
+
+{
+  "tenantId": "11111111-1111-1111-1111-111111111111",
+  "customerId": "22222222-2222-2222-2222-222222222222",
+  "productId": "33333333-3333-3333-3333-333333333333",
+  "quantity": 10
+}
