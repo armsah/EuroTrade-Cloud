@@ -1,0 +1,6 @@
+@EuroTrade.Api_HostAddress = http://localhost:5237
+
+GET {{EuroTrade.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
