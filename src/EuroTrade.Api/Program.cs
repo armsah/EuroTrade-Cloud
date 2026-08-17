@@ -1,41 +1,47 @@
+using EuroTrade.Application.Orders;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddScoped<CreateOrderService>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+app.MapGet("/health", () => Results.Ok(new
 {
-    app.MapOpenApi();
-}
+    status = "healthy"
+}));
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+app.MapPost("/api/orders", (
+    CreateOrderRequest request,
+    CreateOrderService service) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var command = new CreateOrderCommand(
+        request.TenantId,
+        request.CustomerId,
+        request.ProductId,
+        request.Quantity);
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    try
+    {
+        var result = service.Execute(command);
+
+        return Results.Created(
+            $"/api/orders/{result.OrderId}",
+            result);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new
+        {
+            error = exception.Message
+        });
+    }
+});
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+public sealed record CreateOrderRequest(
+    Guid TenantId,
+    Guid CustomerId,
+    Guid ProductId,
+    int Quantity);
