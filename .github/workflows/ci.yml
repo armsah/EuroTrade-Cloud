@@ -46,6 +46,13 @@ jobs:
           docker compose logs postgres
           exit 1
 
+      - name: Apply database migrations
+        run: |
+          dotnet ef database update \
+            --project src/EuroTrade.Infrastructure/EuroTrade.Infrastructure.csproj \
+            --startup-project src/EuroTrade.Api/EuroTrade.Api.csproj \
+            --configuration Release
+
       - name: Test
         run: dotnet test EuroTrade-Cloud.sln --no-build --configuration Release
 
