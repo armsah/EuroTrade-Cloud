@@ -1,0 +1,35 @@
+services:
+
+  postgres:
+    image: postgres:17
+    container_name: eurotrade-postgres
+    environment:
+      POSTGRES_DB: eurotrade
+      POSTGRES_USER: eurotrade
+      POSTGRES_PASSWORD: eurotrade
+    ports:
+      - "5432:5432"
+    volumes:
+      - eurotrade-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eurotrade -d eurotrade"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/EuroTrade.Api/Dockerfile
+    container_name: eurotrade-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__OrdersDb: Host=postgres;Port=5432;Database=eurotrade;Username=eurotrade;Password=eurotrade
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  eurotrade-postgres-data:
