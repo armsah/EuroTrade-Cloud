@@ -75,6 +75,8 @@ app.MapGet("/api/orders/{orderId:guid}", async (
 
 app.Run();
 
+public partial class Program;
+
 public sealed record CreateOrderRequest(
     Guid TenantId,
     Guid CustomerId,

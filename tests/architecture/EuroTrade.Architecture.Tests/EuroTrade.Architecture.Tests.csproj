@@ -18,4 +18,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\EuroTrade.Api\EuroTrade.Api.csproj" />
+    <ProjectReference Include="..\..\..\src\EuroTrade.Application\EuroTrade.Application.csproj" />
+    <ProjectReference Include="..\..\..\src\EuroTrade.Domain\EuroTrade.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\EuroTrade.Infrastructure\EuroTrade.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>
