@@ -21,3 +21,15 @@ output "key_vault_uri" {
 output "log_analytics_workspace_name" {
   value = module.monitoring.name
 }
+
+output "postgresql_server_name" {
+  value = module.postgresql.name
+}
+
+output "postgresql_fqdn" {
+  value = module.postgresql.fqdn
+}
+
+output "postgresql_database_name" {
+  value = module.postgresql.database_name
+}

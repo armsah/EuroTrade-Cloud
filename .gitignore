@@ -495,3 +495,5 @@ crash.*.log
 # Terraform plan files
 *.tfplan
 *.tfstate.lock.info
+
+.azure-tmp/

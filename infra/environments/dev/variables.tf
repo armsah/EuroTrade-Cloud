@@ -25,3 +25,9 @@ variable "project_name" {
   description = "Project name used in resource naming."
   default     = "eurotrade"
 }
+
+variable "postgres_admin_password" {
+  type        = string
+  sensitive   = true
+  description = "PostgreSQL administrator password supplied through TF_VAR_postgres_admin_password."
+}

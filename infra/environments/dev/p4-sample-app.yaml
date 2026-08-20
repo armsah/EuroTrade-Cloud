@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eurotrade-sample
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eurotrade-sample
+  template:
+    metadata:
+      labels:
+        app: eurotrade-sample
+    spec:
+      containers:
+        - name: nginx
+          image: eurotradedevacr.azurecr.io/eurotrade-nginx:alpine
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eurotrade-sample
+spec:
+  type: LoadBalancer
+  selector:
+    app: eurotrade-sample
+  ports:
+    - port: 80
+      targetPort: 80

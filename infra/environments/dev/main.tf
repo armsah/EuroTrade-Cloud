@@ -44,3 +44,35 @@ module "monitoring" {
   location            = module.resource_group.location
   tags                = local.tags
 }
+
+module "aks" {
+  source = "../../modules/aks"
+
+  name                = "aks-${local.name_prefix}"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+  dns_prefix          = "aks-${local.name_prefix}"
+  tenant_id           = var.tenant_id
+
+  acr_id                     = module.acr.id
+  log_analytics_workspace_id = module.monitoring.id
+
+  tags = local.tags
+}
+
+module "postgresql" {
+  source = "../../modules/postgresql"
+
+  name                = "${local.name_prefix}-postgresql"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+
+  administrator_login    = "eurotradeadmin"
+  administrator_password = var.postgres_admin_password
+
+  database_name = "eurotrade"
+  sku_name      = "B_Standard_B1ms"
+  storage_mb    = 32768
+
+  tags = local.tags
+}
