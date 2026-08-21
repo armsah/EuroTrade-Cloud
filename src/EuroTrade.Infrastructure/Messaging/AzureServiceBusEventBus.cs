@@ -20,6 +20,7 @@ public sealed class AzureServiceBusEventBus(
         var eventType = message switch
         {
             OrderCreated => nameof(OrderCreated),
+
             _ => throw new InvalidOperationException(
                 $"Unsupported event type: {message.GetType().Name}")
         };
@@ -34,7 +35,8 @@ public sealed class AzureServiceBusEventBus(
             ContentType = "application/json"
         };
 
-        serviceBusMessage.ApplicationProperties["eventType"] = eventType;
+        serviceBusMessage.ApplicationProperties["eventType"] =
+            eventType;
 
         await sender.SendMessageAsync(
             serviceBusMessage,

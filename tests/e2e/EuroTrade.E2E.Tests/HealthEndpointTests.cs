@@ -1,5 +1,4 @@
 using System.Net;
-using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace EuroTrade.E2E.Tests;
 
@@ -8,7 +7,8 @@ public sealed class HealthEndpointTests
 {
     private readonly HttpClient _client;
 
-    public HealthEndpointTests(EuroTradeApiFactory factory)
+    public HealthEndpointTests(
+        EuroTradeApiFactory factory)
     {
         _client = factory.CreateClient();
     }
@@ -16,7 +16,8 @@ public sealed class HealthEndpointTests
     [Fact]
     public async Task Get_health_returns_ok()
     {
-        var response = await _client.GetAsync("/health");
+        var response =
+            await _client.GetAsync("/health");
 
         Assert.Equal(
             HttpStatusCode.OK,

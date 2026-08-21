@@ -27,6 +27,7 @@ public sealed class InMemoryEventBus : IEventBus, IEventConsumer
     public IAsyncEnumerable<object> ReadAllAsync(
         CancellationToken cancellationToken = default)
     {
-        return _channel.Reader.ReadAllAsync(cancellationToken);
+        return _channel.Reader.ReadAllAsync(
+            cancellationToken);
     }
 }

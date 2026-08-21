@@ -12,7 +12,6 @@ namespace EuroTrade.Infrastructure.Messaging;
 
 public sealed class OrderEventWorker(
     IEventConsumer eventConsumer,
-    ServiceBusReceiver receiver,
     IDbContextFactory<OrdersDbContext> dbContextFactory,
     IConfiguration configuration,
     ILogger<OrderEventWorker> logger)
@@ -26,91 +25,123 @@ public sealed class OrderEventWorker(
                 "ServiceBus:ForceProcessingFailure");
 
         await foreach (
-            var message in eventConsumer.ReadAllAsync(stoppingToken))
+            var message in eventConsumer.ReadAllAsync(
+                stoppingToken))
         {
-            if (message is not AzureServiceBusEventConsumer.ServiceBusConsumedEvent consumedEvent)
-                continue;
-
-            try
+            switch (message)
             {
-                switch (consumedEvent.Event)
-                {
-                    case OrderCreated orderCreated:
+                case AzureServiceBusEventConsumer.ServiceBusConsumedEvent
+                    consumedEvent:
 
-                        logger.LogInformation(
-                            "OrderCreated event consumed. " +
-                            "OrderId: {OrderId}, TenantId: {TenantId}, " +
-                            "DeliveryCount: {DeliveryCount}",
-                            orderCreated.OrderId,
-                            orderCreated.TenantId,
-                            consumedEvent.Message.DeliveryCount);
+                    await ProcessServiceBusEventAsync(
+                        consumedEvent,
+                        forceFailure,
+                        stoppingToken);
 
-                        if (forceFailure)
-                        {
-                            throw new InvalidOperationException(
-                                "Intentional P6 retry/DLQ test failure.");
-                        }
+                    break;
 
-                        await using (var dbContext =
-                            await dbContextFactory.CreateDbContextAsync(
-                                stoppingToken))
-                        {
-                            var exists =
-                                await dbContext.InboxMessages.AnyAsync(
-                                    inbox =>
-                                        inbox.MessageId ==
-                                        consumedEvent.Message.MessageId,
-                                    stoppingToken);
+                case OrderCreated orderCreated:
 
-                            if (!exists)
-                            {
-                                dbContext.InboxMessages.Add(
-                                    new InboxMessage
-                                    {
-                                        Id = Guid.NewGuid(),
-                                        MessageId =
-                                            consumedEvent.Message.MessageId,
-                                        ReceivedAt =
-                                            DateTimeOffset.UtcNow,
-                                        ProcessedAt =
-                                            DateTimeOffset.UtcNow
-                                    });
+                    logger.LogInformation(
+                        "OrderCreated event consumed in memory. " +
+                        "OrderId: {OrderId}, TenantId: {TenantId}",
+                        orderCreated.OrderId,
+                        orderCreated.TenantId);
 
-                                await dbContext.SaveChangesAsync(
-                                    stoppingToken);
-                            }
-                        }
+                    break;
 
-                        await receiver.CompleteMessageAsync(
-                            consumedEvent.Message,
-                            stoppingToken);
+                default:
 
-                        break;
+                    logger.LogWarning(
+                        "Unsupported event type {EventType}.",
+                        message.GetType().Name);
 
-                    default:
-
-                        await receiver.DeadLetterMessageAsync(
-                            consumedEvent.Message,
-                            "UnknownEventType",
-                            $"Unsupported event type: {consumedEvent.Event.GetType().Name}",
-                            stoppingToken);
-
-                        break;
-                }
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(
-                    exception,
-                    "Error processing Service Bus message {MessageId}. " +
-                    "DeliveryCount: {DeliveryCount}",
-                    consumedEvent.Message.MessageId,
-                    consumedEvent.Message.DeliveryCount);
-
-                await receiver.AbandonMessageAsync(
-                    consumedEvent.Message,
-                    cancellationToken: stoppingToken);
+                    break;
             }
         }
+    }
+
+    private async Task ProcessServiceBusEventAsync(
+        AzureServiceBusEventConsumer.ServiceBusConsumedEvent consumedEvent,
+        bool forceFailure,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            switch (consumedEvent.Event)
+            {
+                case OrderCreated orderCreated:
+
+                    logger.LogInformation(
+                        "OrderCreated event consumed. " +
+                        "OrderId: {OrderId}, TenantId: {TenantId}, " +
+                        "DeliveryCount: {DeliveryCount}",
+                        orderCreated.OrderId,
+                        orderCreated.TenantId,
+                        consumedEvent.Message.DeliveryCount);
+
+                    if (forceFailure)
+                    {
+                        throw new InvalidOperationException(
+                            "Intentional P6 retry/DLQ test failure.");
+                    }
+
+                    await RecordInboxMessageAsync(
+                        consumedEvent.Message.MessageId,
+                        cancellationToken);
+
+                    break;
+
+                default:
+
+                    logger.LogWarning(
+                        "Unsupported event type {EventType}.",
+                        consumedEvent.Event.GetType().Name);
+
+                    break;
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Error processing Service Bus message {MessageId}. " +
+                "DeliveryCount: {DeliveryCount}",
+                consumedEvent.Message.MessageId,
+                consumedEvent.Message.DeliveryCount);
+
+            throw;
+        }
+    }
+
+    private async Task RecordInboxMessageAsync(
+        string messageId,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext =
+            await dbContextFactory.CreateDbContextAsync(
+                cancellationToken);
+
+        var exists =
+            await dbContext.InboxMessages.AnyAsync(
+                inbox => inbox.MessageId == messageId,
+                cancellationToken);
+
+        if (exists)
+        {
+            return;
+        }
+
+        dbContext.InboxMessages.Add(
+            new InboxMessage
+            {
+                Id = Guid.NewGuid(),
+                MessageId = messageId,
+                ReceivedAt = DateTimeOffset.UtcNow,
+                ProcessedAt = DateTimeOffset.UtcNow
+            });
+
+        await dbContext.SaveChangesAsync(
+            cancellationToken);
     }
 }

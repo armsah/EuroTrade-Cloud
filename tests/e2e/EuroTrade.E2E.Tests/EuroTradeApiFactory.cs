@@ -13,36 +13,44 @@ public sealed class EuroTradeApiFactory
 {
     private SqliteConnection? _connection;
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    protected override void ConfigureWebHost(
+        IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
 
         builder.ConfigureServices(services =>
         {
-            // Remove the production PostgreSQL DbContext registration.
+            services.RemoveAll<IDbContextFactory<OrdersDbContext>>();
             services.RemoveAll<OrdersDbContext>();
             services.RemoveAll<DbContextOptions<OrdersDbContext>>();
+            services.RemoveAll<
+                Microsoft.EntityFrameworkCore.Infrastructure
+                    .IDbContextOptionsConfiguration<OrdersDbContext>>();
 
-            // Remove the existing PostgreSQL EF provider registration.
-            services.RemoveAll<Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration<OrdersDbContext>>();
+            _connection = new SqliteConnection(
+                "DataSource=:memory:");
 
-            // Keep SQLite in-memory database alive for the lifetime
-            // of the test server.
-            _connection = new SqliteConnection("DataSource=:memory:");
             _connection.Open();
 
-            services.AddDbContext<OrdersDbContext>(options =>
-            {
-                options.UseSqlite(_connection);
-            });
+            services.AddDbContextFactory<OrdersDbContext>(
+                options =>
+                {
+                    options.UseSqlite(_connection);
+                });
 
-            // Create the SQLite schema.
-            using var serviceProvider = services.BuildServiceProvider();
+            using var serviceProvider =
+                services.BuildServiceProvider();
 
-            using var scope = serviceProvider.CreateScope();
+            using var scope =
+                serviceProvider.CreateScope();
 
-            var db = scope.ServiceProvider
-                .GetRequiredService<OrdersDbContext>();
+            var dbFactory =
+                scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<OrdersDbContext>>();
+
+            using var db =
+                dbFactory.CreateDbContext();
 
             db.Database.EnsureCreated();
         });

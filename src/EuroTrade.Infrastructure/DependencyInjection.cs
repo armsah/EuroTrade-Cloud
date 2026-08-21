@@ -27,14 +27,24 @@ public static class DependencyInjection
         services.AddScoped<IOrderWriter, EfOrderWriter>();
 
         var serviceBusConnectionString =
-            configuration["ServiceBus:ConnectionString"]
-            ?? throw new InvalidOperationException(
-                "Service Bus connection string was not configured.");
+            configuration["ServiceBus:ConnectionString"];
 
         var queueName =
-            configuration["ServiceBus:QueueName"]
-            ?? throw new InvalidOperationException(
-                "Service Bus queue name was not configured.");
+            configuration["ServiceBus:QueueName"];
+
+        if (string.IsNullOrWhiteSpace(serviceBusConnectionString) ||
+            string.IsNullOrWhiteSpace(queueName))
+        {
+            services.AddSingleton<InMemoryEventBus>();
+            services.AddSingleton<IEventBus>(
+                provider => provider.GetRequiredService<InMemoryEventBus>());
+            services.AddSingleton<IEventConsumer>(
+                provider => provider.GetRequiredService<InMemoryEventBus>());
+
+            services.AddHostedService<OrderEventWorker>();
+
+            return services;
+        }
 
         var serviceBusClient =
             new ServiceBusClient(serviceBusConnectionString);
@@ -57,5 +67,3 @@ public static class DependencyInjection
         return services;
     }
 }
-
-

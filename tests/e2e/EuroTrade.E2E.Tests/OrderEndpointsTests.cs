@@ -8,7 +8,8 @@ public sealed class OrderEndpointsTests
 {
     private readonly HttpClient _client;
 
-    public OrderEndpointsTests(EuroTradeApiFactory factory)
+    public OrderEndpointsTests(
+        EuroTradeApiFactory factory)
     {
         _client = factory.CreateClient();
     }
@@ -22,38 +23,73 @@ public sealed class OrderEndpointsTests
             Guid.NewGuid(),
             5);
 
-        var createResponse = await _client.PostAsJsonAsync(
-            "/api/orders",
-            request);
+        var createResponse =
+            await _client.PostAsJsonAsync(
+                "/api/orders",
+                request);
 
         Assert.Equal(
             HttpStatusCode.Created,
             createResponse.StatusCode);
 
-        var created = await createResponse.Content
-            .ReadFromJsonAsync<CreateOrderResponse>();
+        var created =
+            await createResponse.Content
+                .ReadFromJsonAsync<CreateOrderResponse>();
 
         Assert.NotNull(created);
-        Assert.NotEqual(Guid.Empty, created.OrderId);
+        Assert.NotEqual(
+            Guid.Empty,
+            created.OrderId);
 
-        var getResponse = await _client.GetAsync(
-            $"/api/orders/{created.OrderId}");
+        var getResponse =
+            await _client.GetAsync(
+                $"/api/orders/{created.OrderId}");
 
         Assert.Equal(
             HttpStatusCode.OK,
             getResponse.StatusCode);
 
-        var order = await getResponse.Content
-            .ReadFromJsonAsync<GetOrderResponse>();
+        var order =
+            await getResponse.Content
+                .ReadFromJsonAsync<GetOrderResponse>();
 
         Assert.NotNull(order);
 
-        Assert.Equal(created.OrderId, order.OrderId);
-        Assert.Equal(request.TenantId, order.TenantId);
-        Assert.Equal(request.CustomerId, order.CustomerId);
-        Assert.Equal(request.ProductId, order.ProductId);
-        Assert.Equal(request.Quantity, order.Quantity);
-        Assert.Equal("Pending", order.Status);
+        Assert.Equal(
+            created.OrderId,
+            order.OrderId);
+
+        Assert.Equal(
+            request.TenantId,
+            order.TenantId);
+
+        Assert.Equal(
+            request.CustomerId,
+            order.CustomerId);
+
+        Assert.Equal(
+            request.ProductId,
+            order.ProductId);
+
+        Assert.Equal(
+            request.Quantity,
+            order.Quantity);
+
+        Assert.Equal(
+            "Pending",
+            order.Status);
+    }
+
+    [Fact]
+    public async Task Get_unknown_order_returns_not_found()
+    {
+        var response =
+            await _client.GetAsync(
+                $"/api/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            response.StatusCode);
     }
 
     private sealed record CreateOrderRequest(

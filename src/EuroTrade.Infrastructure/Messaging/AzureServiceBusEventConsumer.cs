@@ -4,14 +4,14 @@ using Azure.Messaging.ServiceBus;
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
 using EuroTrade.Infrastructure.Persistence;
-using EuroTrade.Infrastructure.Persistence.Inbox;
 using Microsoft.EntityFrameworkCore;
 
 namespace EuroTrade.Infrastructure.Messaging;
 
 public sealed class AzureServiceBusEventConsumer(
     ServiceBusReceiver receiver,
-    IDbContextFactory<OrdersDbContext> dbContextFactory) : IEventConsumer
+    IDbContextFactory<OrdersDbContext> dbContextFactory)
+    : IEventConsumer
 {
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
@@ -37,7 +37,9 @@ public sealed class AzureServiceBusEventConsumer(
             }
 
             if (message is null)
+            {
                 continue;
+            }
 
             await using var dbContext =
                 await dbContextFactory.CreateDbContextAsync(
@@ -45,7 +47,8 @@ public sealed class AzureServiceBusEventConsumer(
 
             var alreadyReceived =
                 await dbContext.InboxMessages.AnyAsync(
-                    inbox => inbox.MessageId == message.MessageId,
+                    inbox =>
+                        inbox.MessageId == message.MessageId,
                     cancellationToken);
 
             if (alreadyReceived)

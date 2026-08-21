@@ -4,15 +4,17 @@ using EuroTrade.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInfrastructure(builder.Configuration);
+
 builder.Services.AddScoped<CreateOrderService>();
 builder.Services.AddScoped<GetOrderService>();
 
 var app = builder.Build();
 
-app.MapGet("/health", () => Results.Ok(new
-{
-    status = "healthy"
-}));
+app.MapGet("/health", () =>
+    Results.Ok(new
+    {
+        status = "healthy"
+    }));
 
 app.MapPost("/api/orders", async (
     CreateOrderRequest request,

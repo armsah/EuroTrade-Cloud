@@ -20,16 +20,18 @@ public sealed class OutboxPublisher(
     protected override async Task ExecuteAsync(
         CancellationToken stoppingToken)
     {
-        logger.LogInformation("Outbox publisher started.");
+        logger.LogInformation(
+            "Outbox publisher started.");
 
-        using var timer = new PeriodicTimer(
-            TimeSpan.FromSeconds(2));
+        using var timer =
+            new PeriodicTimer(TimeSpan.FromSeconds(2));
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await PublishPendingMessagesAsync(stoppingToken);
+                await PublishPendingMessagesAsync(
+                    stoppingToken);
             }
             catch (OperationCanceledException)
                 when (stoppingToken.IsCancellationRequested)
@@ -45,7 +47,8 @@ public sealed class OutboxPublisher(
 
             try
             {
-                await timer.WaitForNextTickAsync(stoppingToken);
+                await timer.WaitForNextTickAsync(
+                    stoppingToken);
             }
             catch (OperationCanceledException)
                 when (stoppingToken.IsCancellationRequested)
@@ -54,25 +57,31 @@ public sealed class OutboxPublisher(
             }
         }
 
-        logger.LogInformation("Outbox publisher stopped.");
+        logger.LogInformation(
+            "Outbox publisher stopped.");
     }
 
     private async Task PublishPendingMessagesAsync(
         CancellationToken cancellationToken)
     {
-        using var scope = scopeFactory.CreateScope();
+        using var scope =
+            scopeFactory.CreateScope();
 
         var dbContext =
-            scope.ServiceProvider.GetRequiredService<OrdersDbContext>();
+            scope.ServiceProvider
+                .GetRequiredService<OrdersDbContext>();
 
         var eventBus =
-            scope.ServiceProvider.GetRequiredService<IEventBus>();
+            scope.ServiceProvider
+                .GetRequiredService<IEventBus>();
 
-        var messages = await dbContext.OutboxMessages
-            .Where(message => message.PublishedAt == null)
-            .OrderBy(message => message.CreatedAt)
-            .Take(20)
-            .ToListAsync(cancellationToken);
+        var messages =
+            await dbContext.OutboxMessages
+                .Where(message =>
+                    message.PublishedAt == null)
+                .OrderBy(message => message.CreatedAt)
+                .Take(20)
+                .ToListAsync(cancellationToken);
 
         foreach (var message in messages)
         {
@@ -81,52 +90,59 @@ public sealed class OutboxPublisher(
                 switch (message.MessageType)
                 {
                     case nameof(OrderCreated):
-                    {
-                        var orderCreated =
-                            JsonSerializer.Deserialize<OrderCreated>(
-                                message.Payload,
-                                JsonOptions)
-                            ?? throw new InvalidOperationException(
-                                $"Could not deserialize outbox message {message.Id}.");
+                        {
+                            var orderCreated =
+                                JsonSerializer.Deserialize<OrderCreated>(
+                                    message.Payload,
+                                    JsonOptions)
+                                ?? throw new InvalidOperationException(
+                                    $"Could not deserialize outbox " +
+                                    $"message {message.Id}.");
 
-                        await eventBus.PublishAsync(
-                            orderCreated,
-                            cancellationToken);
+                            await eventBus.PublishAsync(
+                                orderCreated,
+                                cancellationToken);
 
-                        message.PublishedAt =
-                            DateTimeOffset.UtcNow;
+                            message.PublishedAt =
+                                DateTimeOffset.UtcNow;
 
-                        message.Error = null;
+                            message.Error = null;
 
-                        await dbContext.SaveChangesAsync(
-                            cancellationToken);
+                            await dbContext.SaveChangesAsync(
+                                cancellationToken);
 
-                        logger.LogInformation(
-                            "Published outbox message {MessageId}. " +
-                            "MessageType: {MessageType}. " +
-                            "OrderId: {OrderId}",
-                            message.Id,
-                            message.MessageType,
-                            orderCreated.OrderId);
+                            logger.LogInformation(
+                                "Published outbox message {MessageId}. " +
+                                "MessageType: {MessageType}. " +
+                                "OrderId: {OrderId}",
+                                message.Id,
+                                message.MessageType,
+                                orderCreated.OrderId);
 
-                        break;
-                    }
+                            break;
+                        }
 
                     default:
                         message.Error =
-                            $"Unsupported outbox message type: {message.MessageType}";
+                            $"Unsupported outbox message type: " +
+                            $"{message.MessageType}";
 
                         await dbContext.SaveChangesAsync(
                             cancellationToken);
 
                         logger.LogError(
-                            "Unsupported outbox message type {MessageType}. " +
-                            "OutboxMessageId: {MessageId}",
+                            "Unsupported outbox message type " +
+                            "{MessageType}. OutboxMessageId: {MessageId}",
                             message.MessageType,
                             message.Id);
 
                         break;
                 }
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception exception)
             {
@@ -137,8 +153,8 @@ public sealed class OutboxPublisher(
 
                 logger.LogError(
                     exception,
-                    "Failed to publish outbox message {MessageId}. " +
-                    "It will be retried.",
+                    "Failed to publish outbox message " +
+                    "{MessageId}. It will be retried.",
                     message.Id);
             }
         }

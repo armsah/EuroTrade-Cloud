@@ -5,16 +5,21 @@ using Microsoft.EntityFrameworkCore;
 
 namespace EuroTrade.Infrastructure.Persistence;
 
-public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options)
+public sealed class OrdersDbContext(
+    DbContextOptions<OrdersDbContext> options)
     : DbContext(options)
 {
-    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<Order> Orders =>
+        Set<Order>();
 
-    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<OutboxMessage> OutboxMessages =>
+        Set<OutboxMessage>();
 
-    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+    public DbSet<InboxMessage> InboxMessages =>
+        Set<InboxMessage>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnModelCreating(
+        ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Order>(entity =>
         {
@@ -59,6 +64,12 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options)
 
             entity.Property(message => message.CreatedAt)
                 .IsRequired();
+
+            entity.HasIndex(message => new
+            {
+                message.PublishedAt,
+                message.CreatedAt
+            });
         });
 
         modelBuilder.Entity<InboxMessage>(entity =>
