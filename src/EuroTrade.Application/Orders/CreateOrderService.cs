@@ -1,12 +1,10 @@
-using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
 using EuroTrade.Domain.Orders;
 
 namespace EuroTrade.Application.Orders;
 
 public sealed class CreateOrderService(
-    IOrderRepository orderRepository,
-    IEventBus eventBus)
+    IOrderWriter orderWriter)
 {
     public async Task<CreateOrderResult> ExecuteAsync(
         CreateOrderCommand command,
@@ -18,18 +16,17 @@ public sealed class CreateOrderService(
             command.ProductId,
             command.Quantity);
 
-        await orderRepository.AddAsync(
-            order,
-            cancellationToken);
+        var orderCreated = new OrderCreated(
+            order.Id,
+            order.TenantId,
+            order.CustomerId,
+            order.ProductId,
+            order.Quantity,
+            order.CreatedAt);
 
-        await eventBus.PublishAsync(
-            new OrderCreated(
-                order.Id,
-                order.TenantId,
-                order.CustomerId,
-                order.ProductId,
-                order.Quantity,
-                order.CreatedAt),
+        await orderWriter.AddAsync(
+            order,
+            orderCreated,
             cancellationToken);
 
         return new CreateOrderResult(

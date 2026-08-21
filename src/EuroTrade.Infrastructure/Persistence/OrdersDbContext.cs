@@ -1,4 +1,6 @@
 using EuroTrade.Domain.Orders;
+using EuroTrade.Infrastructure.Persistence.Inbox;
+using EuroTrade.Infrastructure.Persistence.Outbox;
 using Microsoft.EntityFrameworkCore;
 
 namespace EuroTrade.Infrastructure.Persistence;
@@ -7,6 +9,10 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options)
     : DbContext(options)
 {
     public DbSet<Order> Orders => Set<Order>();
+
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -36,6 +42,38 @@ public sealed class OrdersDbContext(DbContextOptions<OrdersDbContext> options)
                 .IsRequired();
 
             entity.Property(order => order.CreatedAt)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.ToTable("outbox_messages");
+
+            entity.HasKey(message => message.Id);
+
+            entity.Property(message => message.MessageType)
+                .IsRequired();
+
+            entity.Property(message => message.Payload)
+                .IsRequired();
+
+            entity.Property(message => message.CreatedAt)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<InboxMessage>(entity =>
+        {
+            entity.ToTable("inbox_messages");
+
+            entity.HasKey(message => message.Id);
+
+            entity.Property(message => message.MessageId)
+                .IsRequired();
+
+            entity.HasIndex(message => message.MessageId)
+                .IsUnique();
+
+            entity.Property(message => message.ReceivedAt)
                 .IsRequired();
         });
     }

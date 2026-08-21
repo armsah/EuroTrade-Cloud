@@ -1,3 +1,4 @@
+using Azure.Messaging.ServiceBus;
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders;
 using EuroTrade.Infrastructure.Messaging;
@@ -14,27 +15,47 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("OrdersDb")
+        var connectionString =
+            configuration.GetConnectionString("OrdersDb")
             ?? throw new InvalidOperationException(
                 "Connection string 'OrdersDb' was not configured.");
 
-        services.AddDbContext<OrdersDbContext>(options =>
+        services.AddDbContextFactory<OrdersDbContext>(options =>
             options.UseNpgsql(connectionString));
 
         services.AddScoped<IOrderRepository, EfOrderRepository>();
+        services.AddScoped<IOrderWriter, EfOrderWriter>();
 
-        services.AddSingleton<InMemoryEventBus>();
+        var serviceBusConnectionString =
+            configuration["ServiceBus:ConnectionString"]
+            ?? throw new InvalidOperationException(
+                "Service Bus connection string was not configured.");
 
-        services.AddSingleton<IEventBus>(
-            serviceProvider =>
-                serviceProvider.GetRequiredService<InMemoryEventBus>());
+        var queueName =
+            configuration["ServiceBus:QueueName"]
+            ?? throw new InvalidOperationException(
+                "Service Bus queue name was not configured.");
 
-        services.AddSingleton<IEventConsumer>(
-            serviceProvider =>
-                serviceProvider.GetRequiredService<InMemoryEventBus>());
+        var serviceBusClient =
+            new ServiceBusClient(serviceBusConnectionString);
+
+        services.AddSingleton(serviceBusClient);
+
+        services.AddSingleton(
+            serviceBusClient.CreateSender(queueName));
+
+        services.AddSingleton(
+            serviceBusClient.CreateReceiver(queueName));
+
+        services.AddSingleton<IEventBus, AzureServiceBusEventBus>();
+
+        services.AddSingleton<IEventConsumer, AzureServiceBusEventConsumer>();
 
         services.AddHostedService<OrderEventWorker>();
+        services.AddHostedService<OutboxPublisher>();
 
         return services;
     }
 }
+
+

@@ -7,7 +7,7 @@ public sealed class Order
     public Guid CustomerId { get; }
     public Guid ProductId { get; }
     public int Quantity { get; }
-    public OrderStatus Status { get; }
+    public OrderStatus Status { get; private set; }
     public DateTimeOffset CreatedAt { get; }
 
     private Order(
@@ -55,5 +55,13 @@ public sealed class Order
             productId,
             quantity,
             createdAt ?? DateTimeOffset.UtcNow);
+    }
+
+    public void Confirm()
+    {
+        if (Status != OrderStatus.Pending)
+            return;
+
+        Status = OrderStatus.Confirmed;
     }
 }
