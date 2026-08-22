@@ -20,6 +20,8 @@ resource "azurerm_kubernetes_cluster" "this" {
     os_disk_size_gb = 30
     type            = "VirtualMachineScaleSets"
 
+    vnet_subnet_id = var.subnet_id
+
     upgrade_settings {
       max_surge = "10%"
     }

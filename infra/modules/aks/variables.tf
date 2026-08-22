@@ -49,3 +49,8 @@ variable "node_vm_size" {
   type        = string
   default     = "Standard_B2s_v2"
 }
+
+variable "subnet_id" {
+  type        = string
+  description = "Subnet resource ID used by the AKS node pool."
+}

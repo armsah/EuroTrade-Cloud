@@ -45,6 +45,20 @@ module "monitoring" {
   tags                = local.tags
 }
 
+module "network" {
+  source = "../../modules/network"
+
+  name                = "vnet-${local.name_prefix}"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+
+  address_space                 = ["10.20.0.0/16"]
+  aks_subnet_prefixes           = ["10.20.1.0/24"]
+  private_endpoint_subnet_prefixes = ["10.20.2.0/24"]
+
+  tags = local.tags
+}
+
 module "aks" {
   source = "../../modules/aks"
 
@@ -56,6 +70,8 @@ module "aks" {
 
   acr_id                     = module.acr.id
   log_analytics_workspace_id = module.monitoring.id
+
+  subnet_id = module.network.aks_subnet_id
 
   tags = local.tags
 }
@@ -73,6 +89,20 @@ module "postgresql" {
   database_name = "eurotrade"
   sku_name      = "B_Standard_B1ms"
   storage_mb    = 32768
+
+  tags = local.tags
+}
+
+module "private_connectivity" {
+  source = "../../modules/private-connectivity"
+
+  resource_group_name        = module.resource_group.name
+  location                   = module.resource_group.location
+  vnet_id                    = module.network.id
+  private_endpoint_subnet_id = module.network.private_endpoint_subnet_id
+
+  key_vault_id = module.key_vault.id
+  postgresql_id = module.postgresql.id
 
   tags = local.tags
 }
