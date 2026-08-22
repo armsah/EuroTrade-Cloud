@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: azure-cli-test-2
+  namespace: default
+  labels:
+    azure.workload.identity/use: "true"
+spec:
+  serviceAccountName: eurotrade
+  restartPolicy: Never
+  containers:
+    - name: azure-cli
+      image: mcr.microsoft.com/azure-cli
+      command: ["sleep", "3600"]

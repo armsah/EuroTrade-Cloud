@@ -1,7 +1,30 @@
+using Azure.Identity;
 using EuroTrade.Application.Orders;
 using EuroTrade.Infrastructure;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Identity.Web;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var keyVaultName = builder.Configuration["KeyVault:Name"];
+
+if (!string.IsNullOrWhiteSpace(keyVaultName))
+{
+    var keyVaultUri = new Uri(
+        $"https://{keyVaultName}.vault.azure.net/");
+
+    builder.Configuration.AddAzureKeyVault(
+        keyVaultUri,
+        new DefaultAzureCredential());
+}
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddMicrosoftIdentityWebApi(
+        builder.Configuration,
+        "AzureAd");
+
+builder.Services.AddAuthorization();
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -9,6 +32,9 @@ builder.Services.AddScoped<CreateOrderService>();
 builder.Services.AddScoped<GetOrderService>();
 
 var app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/health", () =>
     Results.Ok(new
@@ -44,7 +70,8 @@ app.MapPost("/api/orders", async (
             error = exception.Message
         });
     }
-});
+})
+.RequireAuthorization();
 
 app.MapGet("/api/orders/{orderId:guid}", async (
     Guid orderId,
@@ -73,7 +100,8 @@ app.MapGet("/api/orders/{orderId:guid}", async (
         status = order.Status.ToString(),
         createdAt = order.CreatedAt
     });
-});
+})
+.RequireAuthorization();
 
 app.Run();
 

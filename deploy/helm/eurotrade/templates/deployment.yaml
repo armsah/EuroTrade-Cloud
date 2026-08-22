@@ -1,27 +1,36 @@
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: {{ include "eurotrade.fullname" . }}
   labels:
     {{- include "eurotrade.labels" . | nindent 4 }}
+
 spec:
   replicas: {{ .Values.replicaCount }}
+
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
       maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+
   selector:
     matchLabels:
       {{- include "eurotrade.selectorLabels" . | nindent 6 }}
+
   template:
     metadata:
       labels:
         {{- include "eurotrade.selectorLabels" . | nindent 8 }}
+        azure.workload.identity/use: "true"
+
     spec:
       serviceAccountName: {{ include "eurotrade.serviceAccountName" . }}
+
       containers:
         - name: eurotrade-api
+
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
 
@@ -31,9 +40,12 @@ spec:
               protocol: TCP
 
           env:
-            - name: ASPNETCORE_ENVIRONMENT
-              value: "Production"
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
 
+            # PostgreSQL connection string
             - name: ConnectionStrings__OrdersDb
               valueFrom:
                 secretKeyRef:
@@ -61,3 +73,4 @@ spec:
 
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+
