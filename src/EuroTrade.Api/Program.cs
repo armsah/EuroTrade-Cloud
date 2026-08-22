@@ -1,12 +1,19 @@
 using Azure.Identity;
+using Azure.Monitor.OpenTelemetry.Exporter;
 using EuroTrade.Application.Orders;
 using EuroTrade.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Identity.Web;
+using OpenTelemetry.Trace;
+
+AppContext.SetSwitch(
+    "Azure.Experimental.EnableActivitySource",
+    true);
 
 var builder = WebApplication.CreateBuilder(args);
 
-var keyVaultName = builder.Configuration["KeyVault:Name"];
+var keyVaultName =
+    builder.Configuration["KeyVault:Name"];
 
 if (!string.IsNullOrWhiteSpace(keyVaultName))
 {
@@ -18,90 +25,142 @@ if (!string.IsNullOrWhiteSpace(keyVaultName))
         new DefaultAzureCredential());
 }
 
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApi(
-        builder.Configuration,
-        "AzureAd");
+var azureAdClientId =
+    builder.Configuration["AzureAd:ClientId"];
+
+if (!string.IsNullOrWhiteSpace(azureAdClientId))
+{
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddMicrosoftIdentityWebApi(
+            builder.Configuration,
+            "AzureAd");
+}
 
 builder.Services.AddAuthorization();
 
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(
+    builder.Configuration);
 
 builder.Services.AddScoped<CreateOrderService>();
 builder.Services.AddScoped<GetOrderService>();
 
+var applicationInsightsConnectionString =
+    builder.Configuration[
+        "APPLICATIONINSIGHTS_CONNECTION_STRING"]
+    ?? builder.Configuration[
+        "ApplicationInsights:ConnectionString"];
+
+var openTelemetry =
+    builder.Services
+        .AddOpenTelemetry()
+        .WithTracing(tracing =>
+        {
+            tracing
+                .AddSource("EuroTrade.Application")
+                .AddSource("Azure.*")
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation();
+        });
+
+if (!string.IsNullOrWhiteSpace(
+        applicationInsightsConnectionString))
+{
+    openTelemetry.UseAzureMonitorExporter(
+        options =>
+        {
+            options.ConnectionString =
+                applicationInsightsConnectionString;
+        });
+}
+
 var app = builder.Build();
 
-app.UseAuthentication();
+if (!string.IsNullOrWhiteSpace(azureAdClientId))
+{
+    app.UseAuthentication();
+}
+
 app.UseAuthorization();
 
-app.MapGet("/health", () =>
-    Results.Ok(new
-    {
-        status = "healthy"
-    }));
+app.MapGet(
+    "/health",
+    () =>
+        Results.Ok(
+            new
+            {
+                status = "healthy"
+            }));
 
-app.MapPost("/api/orders", async (
-    CreateOrderRequest request,
-    CreateOrderService service,
-    CancellationToken cancellationToken) =>
-{
-    var command = new CreateOrderCommand(
-        request.TenantId,
-        request.CustomerId,
-        request.ProductId,
-        request.Quantity);
-
-    try
+app.MapPost(
+    "/api/orders",
+    async (
+        CreateOrderRequest request,
+        CreateOrderService service,
+        CancellationToken cancellationToken) =>
     {
-        var result = await service.ExecuteAsync(
-            command,
-            cancellationToken);
+        var command = new CreateOrderCommand(
+            request.TenantId,
+            request.CustomerId,
+            request.ProductId,
+            request.Quantity);
 
-        return Results.Created(
-            $"/api/orders/{result.OrderId}",
-            result);
-    }
-    catch (ArgumentException exception)
-    {
-        return Results.BadRequest(new
+        try
         {
-            error = exception.Message
-        });
-    }
-})
-.RequireAuthorization();
+            var result =
+                await service.ExecuteAsync(
+                    command,
+                    cancellationToken);
 
-app.MapGet("/api/orders/{orderId:guid}", async (
-    Guid orderId,
-    GetOrderService service,
-    CancellationToken cancellationToken) =>
-{
-    var order = await service.ExecuteAsync(
-        orderId,
-        cancellationToken);
-
-    if (order is null)
-    {
-        return Results.NotFound(new
+            return Results.Created(
+                $"/api/orders/{result.OrderId}",
+                result);
+        }
+        catch (ArgumentException exception)
         {
-            error = "Order not found."
-        });
-    }
+            return Results.BadRequest(
+                new
+                {
+                    error = exception.Message
+                });
+        }
+    })
+    .RequireAuthorization();
 
-    return Results.Ok(new
+app.MapGet(
+    "/api/orders/{orderId:guid}",
+    async (
+        Guid orderId,
+        GetOrderService service,
+        CancellationToken cancellationToken) =>
     {
-        orderId = order.Id,
-        tenantId = order.TenantId,
-        customerId = order.CustomerId,
-        productId = order.ProductId,
-        quantity = order.Quantity,
-        status = order.Status.ToString(),
-        createdAt = order.CreatedAt
-    });
-})
-.RequireAuthorization();
+        var order =
+            await service.ExecuteAsync(
+                orderId,
+                cancellationToken);
+
+        if (order is null)
+        {
+            return Results.NotFound(
+                new
+                {
+                    error = "Order not found."
+                });
+        }
+
+        return Results.Ok(
+            new
+            {
+                orderId = order.Id,
+                tenantId = order.TenantId,
+                customerId = order.CustomerId,
+                productId = order.ProductId,
+                quantity = order.Quantity,
+                status = order.Status.ToString(),
+                createdAt = order.CreatedAt
+            });
+    })
+    .RequireAuthorization();
 
 app.Run();
 

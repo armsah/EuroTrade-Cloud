@@ -1,7 +1,11 @@
 using System.Text.Json;
+
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
+
 using EuroTrade.Infrastructure.Persistence;
+using EuroTrade.Infrastructure.Persistence.Outbox;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -75,13 +79,30 @@ public sealed class OutboxPublisher(
             scope.ServiceProvider
                 .GetRequiredService<IEventBus>();
 
-        var messages =
-            await dbContext.OutboxMessages
+        var query =
+            dbContext.OutboxMessages
                 .Where(message =>
-                    message.PublishedAt == null)
-                .OrderBy(message => message.CreatedAt)
-                .Take(20)
-                .ToListAsync(cancellationToken);
+                    message.PublishedAt == null);
+
+        List<OutboxMessage> messages;
+
+        if (dbContext.Database.IsSqlite())
+        {
+            messages =
+                (await query
+                    .ToListAsync(cancellationToken))
+                    .OrderBy(message => message.CreatedAt)
+                    .Take(20)
+                    .ToList();
+        }
+        else
+        {
+            messages =
+                await query
+                    .OrderBy(message => message.CreatedAt)
+                    .Take(20)
+                    .ToListAsync(cancellationToken);
+        }
 
         foreach (var message in messages)
         {
@@ -101,6 +122,7 @@ public sealed class OutboxPublisher(
 
                             await eventBus.PublishAsync(
                                 orderCreated,
+                                message.Id.ToString(),
                                 cancellationToken);
 
                             message.PublishedAt =
@@ -146,7 +168,8 @@ public sealed class OutboxPublisher(
             }
             catch (Exception exception)
             {
-                message.Error = exception.Message;
+                message.Error =
+                    exception.Message;
 
                 await dbContext.SaveChangesAsync(
                     cancellationToken);

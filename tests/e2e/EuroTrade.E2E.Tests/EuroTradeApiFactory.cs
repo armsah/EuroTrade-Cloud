@@ -1,36 +1,45 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 
-using EuroTrade.Infrastructure.Persistence;
-
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+using EuroTrade.Infrastructure.Persistence;
+
 namespace EuroTrade.E2E.Tests;
 
-public sealed class EuroTradeApiFactory
-    : WebApplicationFactory<Program>
+public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
 {
-    private readonly string _databasePath;
+    private const string TestAuthenticationScheme = "Test";
+
+    private const string TestDatabaseName =
+        "EuroTradeE2E";
+
+    private readonly SqliteConnection _connection;
+
+    private readonly SemaphoreSlim _databaseLock =
+        new(1, 1);
 
     public EuroTradeApiFactory()
     {
-        // Every WebApplicationFactory gets its own SQLite database.
-        // This prevents parallel E2E test hosts from sharing the
-        // same database file and racing during EnsureCreated().
-        _databasePath = Path.Combine(
-            Path.GetTempPath(),
-            $"EuroTradeE2E_{Guid.NewGuid():N}.db");
+        // Shared in-memory SQLite database.
+        //
+        // The connection remains open for the lifetime of this factory.
+        // All EF Core connections using the same URI will therefore use
+        // the same in-memory database.
+        _connection =
+            new SqliteConnection(
+                $"Data Source=file:{TestDatabaseName};" +
+                "Mode=Memory;" +
+                "Cache=Shared;");
+
+        _connection.Open();
     }
 
     protected override void ConfigureWebHost(
@@ -38,157 +47,186 @@ public sealed class EuroTradeApiFactory
     {
         builder.UseEnvironment("Testing");
 
-        builder.ConfigureAppConfiguration((_, config) =>
-        {
-            config.AddInMemoryCollection(
-                new Dictionary<string, string?>
-                {
-                    ["Database:Provider"] = "Sqlite",
+        // Tell the existing production infrastructure registration
+        // to use SQLite instead of PostgreSQL.
+        //
+        // DependencyInjection.cs already supports:
+        //
+        // Database:Provider = Sqlite
+        //
+        // so we do not need to remove/re-register EF services here.
+        builder.UseSetting(
+            "Database:Provider",
+            "Sqlite");
 
-                    ["ConnectionStrings:OrdersDb"] =
-                        $"Data Source={_databasePath}",
-
-                    ["ServiceBus:ConnectionString"] = null,
-
-                    ["ServiceBus:QueueName"] = null
-                });
-        });
+        builder.UseSetting(
+            "ConnectionStrings:OrdersDb",
+            $"Data Source=file:{TestDatabaseName};" +
+            "Mode=Memory;" +
+            "Cache=Shared;");
 
         builder.ConfigureServices(services =>
         {
-            // Remove every production registration related to
-            // the OrdersDbContext factory/options.
-            services.RemoveAll<
-                IDbContextFactory<OrdersDbContext>>();
+            // ------------------------------------------------------------
+            // Test authentication.
+            //
+            // The production API protects the order endpoints with
+            // RequireAuthorization(). E2E tests should not require a
+            // real Microsoft Entra ID token.
+            //
+            // Instead, every test request receives a local authenticated
+            // principal.
+            // ------------------------------------------------------------
 
-            services.RemoveAll<
-                DbContextOptions<OrdersDbContext>>();
-
-            services.RemoveAll<
-                IDbContextOptionsConfiguration<OrdersDbContext>>();
-
-            // Register a completely isolated SQLite database for
-            // this WebApplicationFactory instance.
-            services.AddDbContextFactory<OrdersDbContext>(
-                options =>
+            services
+                .AddAuthentication(options =>
                 {
-                    options.UseSqlite(
-                        $"Data Source={_databasePath}");
-                });
+                    options.DefaultAuthenticateScheme =
+                        TestAuthenticationScheme;
 
-            // Replace production JWT authentication with a
-            // deterministic authentication scheme for E2E tests.
-            services.AddAuthentication(options =>
-            {
-                options.DefaultAuthenticateScheme =
-                    TestAuthenticationHandler.SchemeName;
+                    options.DefaultChallengeScheme =
+                        TestAuthenticationScheme;
 
-                options.DefaultChallengeScheme =
-                    TestAuthenticationHandler.SchemeName;
-            })
-            .AddScheme<
-                AuthenticationSchemeOptions,
-                TestAuthenticationHandler>(
-                TestAuthenticationHandler.SchemeName,
-                _ =>
-                {
-                });
+                    options.DefaultScheme =
+                        TestAuthenticationScheme;
+                })
+                .AddScheme<
+                    AuthenticationSchemeOptions,
+                    TestAuthenticationHandler>(
+                    TestAuthenticationScheme,
+                    _ =>
+                    {
+                    });
+
+            // ------------------------------------------------------------
+            // Create the SQLite database.
+            //
+            // AddInfrastructure() has already registered
+            // IDbContextFactory<OrdersDbContext> using SQLite because
+            // Database:Provider was set to Sqlite above.
+            // ------------------------------------------------------------
+
+            using var scope =
+                services
+                    .BuildServiceProvider()
+                    .CreateScope();
+
+            var factory =
+                scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<OrdersDbContext>>();
+
+            using var db =
+                factory.CreateDbContext();
+
+            db.Database.EnsureCreated();
         });
     }
 
-    protected override IHost CreateHost(
-        IHostBuilder builder)
+    public async Task ExecuteDbAsync(
+        Func<OrdersDbContext, Task> operation)
     {
-        var host = base.CreateHost(builder);
+        await _databaseLock.WaitAsync();
 
-        using var scope =
-            host.Services.CreateScope();
+        try
+        {
+            using var scope =
+                Services.CreateScope();
 
-        var dbContextFactory =
-            scope.ServiceProvider
-                .GetRequiredService<
-                    IDbContextFactory<OrdersDbContext>>();
+            var factory =
+                scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<OrdersDbContext>>();
 
-        using var dbContext =
-            dbContextFactory.CreateDbContext();
+            await using var db =
+                await factory.CreateDbContextAsync();
 
-        // E2E tests use SQLite and therefore must not attempt
-        // to execute the PostgreSQL migration pipeline.
-        //
-        // EnsureCreated() creates the SQLite schema for this
-        // factory's private database.
-        dbContext.Database.EnsureCreated();
+            await operation(db);
+        }
+        finally
+        {
+            _databaseLock.Release();
+        }
+    }
 
-        return host;
+    public async Task<T> ExecuteDbAsync<T>(
+        Func<OrdersDbContext, Task<T>> operation)
+    {
+        await _databaseLock.WaitAsync();
+
+        try
+        {
+            using var scope =
+                Services.CreateScope();
+
+            var factory =
+                scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<OrdersDbContext>>();
+
+            await using var db =
+                await factory.CreateDbContextAsync();
+
+            return await operation(db);
+        }
+        finally
+        {
+            _databaseLock.Release();
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            try
-            {
-                if (File.Exists(_databasePath))
-                {
-                    File.Delete(_databasePath);
-                }
-            }
-            catch
-            {
-                // Do not mask a test failure because Windows may
-                // still have a SQLite file handle open during
-                // WebApplicationFactory disposal.
-            }
+            _databaseLock.Dispose();
+            _connection.Dispose();
         }
 
         base.Dispose(disposing);
     }
-}
 
-public sealed class TestAuthenticationHandler
-    : AuthenticationHandler<AuthenticationSchemeOptions>
-{
-    public const string SchemeName = "Test";
-
-    public TestAuthenticationHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder)
-        : base(options, logger, encoder)
+    private sealed class TestAuthenticationHandler
+        : AuthenticationHandler<AuthenticationSchemeOptions>
     {
-    }
-
-    protected override Task<AuthenticateResult>
-        HandleAuthenticateAsync()
-    {
-        var claims = new[]
+        public TestAuthenticationHandler(
+            IOptionsMonitor<AuthenticationSchemeOptions> options,
+            ILoggerFactory logger,
+            UrlEncoder encoder)
+            : base(options, logger, encoder)
         {
-            new Claim(
-                ClaimTypes.NameIdentifier,
-                "test-user"),
+        }
 
-            new Claim(
-                ClaimTypes.Name,
-                "test-user"),
+        protected override Task<AuthenticateResult>
+            HandleAuthenticateAsync()
+        {
+            var claims =
+                new[]
+                {
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        "e2e-test-user"),
 
-            new Claim(
-                "tid",
-                Guid.Empty.ToString())
-        };
+                    new Claim(
+                        ClaimTypes.Name,
+                        "E2E Test User")
+                };
 
-        var identity = new ClaimsIdentity(
-            claims,
-            SchemeName);
+            var identity =
+                new ClaimsIdentity(
+                    claims,
+                    TestAuthenticationScheme);
 
-        var principal =
-            new ClaimsPrincipal(identity);
+            var principal =
+                new ClaimsPrincipal(identity);
 
-        var ticket =
-            new AuthenticationTicket(
-                principal,
-                SchemeName);
+            var ticket =
+                new AuthenticationTicket(
+                    principal,
+                    TestAuthenticationScheme);
 
-        return Task.FromResult(
-            AuthenticateResult.Success(ticket));
+            return Task.FromResult(
+                AuthenticateResult.Success(ticket));
+        }
     }
 }

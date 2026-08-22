@@ -41,9 +41,10 @@ public static class DependencyInjection
         var queueName =
             configuration["ServiceBus:QueueName"];
 
-        // Local development fallback.
-        // AKS production uses the Service Bus namespace
-        // together with Azure Workload Identity.
+        // Local development and E2E test fallback.
+        // When Azure Service Bus is not configured, use the
+        // in-memory event bus while keeping the same
+        // Outbox -> EventBus -> Consumer -> Inbox processing flow.
         if (string.IsNullOrWhiteSpace(serviceBusNamespace) ||
             string.IsNullOrWhiteSpace(queueName))
         {
@@ -58,10 +59,14 @@ public static class DependencyInjection
                     provider.GetRequiredService<InMemoryEventBus>());
 
             services.AddHostedService<OrderEventWorker>();
+            services.AddHostedService<OutboxPublisher>();
 
             return services;
         }
 
+        // Production/Azure path.
+        // AKS uses the Service Bus namespace together with
+        // Azure Workload Identity and DefaultAzureCredential.
         var serviceBusClient =
             new ServiceBusClient(
                 serviceBusNamespace,

@@ -1,8 +1,14 @@
+using System.Diagnostics;
+
 using Azure.Messaging.ServiceBus;
+
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
+using EuroTrade.Application.Telemetry;
+
 using EuroTrade.Infrastructure.Persistence;
 using EuroTrade.Infrastructure.Persistence.Inbox;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -30,6 +36,15 @@ public sealed class OrderEventWorker(
         {
             switch (message)
             {
+                case InMemoryEventBus.InMemoryPublishedEvent
+                    inMemoryEvent:
+
+                    await ProcessInMemoryEventAsync(
+                        inMemoryEvent,
+                        stoppingToken);
+
+                    break;
+
                 case AzureServiceBusEventConsumer.ServiceBusConsumedEvent
                     consumedEvent:
 
@@ -42,6 +57,9 @@ public sealed class OrderEventWorker(
 
                 case OrderCreated orderCreated:
 
+                    // Backwards-compatible fallback for any direct
+                    // in-memory OrderCreated messages that do not
+                    // have a message ID.
                     logger.LogInformation(
                         "OrderCreated event consumed in memory. " +
                         "OrderId: {OrderId}, TenantId: {TenantId}",
@@ -61,16 +79,92 @@ public sealed class OrderEventWorker(
         }
     }
 
+    private async Task ProcessInMemoryEventAsync(
+        InMemoryEventBus.InMemoryPublishedEvent publishedEvent,
+        CancellationToken cancellationToken)
+    {
+        if (publishedEvent.Message is not OrderCreated orderCreated)
+        {
+            logger.LogWarning(
+                "Unsupported in-memory event type {EventType}.",
+                publishedEvent.Message.GetType().Name);
+
+            return;
+        }
+
+        logger.LogInformation(
+            "OrderCreated event consumed in memory. " +
+            "OrderId: {OrderId}, TenantId: {TenantId}, " +
+            "MessageId: {MessageId}",
+            orderCreated.OrderId,
+            orderCreated.TenantId,
+            publishedEvent.MessageId);
+
+        if (string.IsNullOrWhiteSpace(
+            publishedEvent.MessageId))
+        {
+            logger.LogWarning(
+                "In-memory OrderCreated event {OrderId} " +
+                "does not contain a message ID.",
+                orderCreated.OrderId);
+
+            return;
+        }
+
+        await RecordInboxMessageAsync(
+            publishedEvent.MessageId,
+            cancellationToken);
+    }
+
     private async Task ProcessServiceBusEventAsync(
         AzureServiceBusEventConsumer.ServiceBusConsumedEvent consumedEvent,
         bool forceFailure,
         CancellationToken cancellationToken)
     {
+        var parentContext = default(ActivityContext);
+
+        if (consumedEvent.Message.ApplicationProperties.TryGetValue(
+                "Diagnostic-Id",
+                out var diagnosticIdValue)
+            && diagnosticIdValue is string diagnosticId)
+        {
+            ActivityContext.TryParse(
+                diagnosticId,
+                null,
+                out parentContext);
+        }
+
+        using var activity =
+            EuroTradeActivitySource.Source.StartActivity(
+                "ProcessOrderCreated",
+                ActivityKind.Consumer,
+                parentContext);
+
+        activity?.SetTag(
+            "messaging.system",
+            "azure_service_bus");
+
+        activity?.SetTag(
+            "messaging.destination.name",
+            consumedEvent.Message.Subject);
+
+        activity?.SetTag(
+            "messaging.message.id",
+            consumedEvent.Message.MessageId);
+
         try
         {
             switch (consumedEvent.Event)
             {
                 case OrderCreated orderCreated:
+
+                    activity?.SetTag(
+                        "order.id",
+                        orderCreated.OrderId);
+
+                    activity?.SetTag(
+                        "order.tenant_id",
+                        orderCreated.TenantId);
 
                     logger.LogInformation(
                         "OrderCreated event consumed. " +
@@ -90,9 +184,16 @@ public sealed class OrderEventWorker(
                         consumedEvent.Message.MessageId,
                         cancellationToken);
 
+                    activity?.SetStatus(
+                        ActivityStatusCode.Ok);
+
                     break;
 
                 default:
+
+                    activity?.SetStatus(
+                        ActivityStatusCode.Error,
+                        "Unsupported event type.");
 
                     logger.LogWarning(
                         "Unsupported event type {EventType}.",
@@ -103,6 +204,10 @@ public sealed class OrderEventWorker(
         }
         catch (Exception exception)
         {
+            activity?.SetStatus(
+                ActivityStatusCode.Error,
+                exception.Message);
+
             logger.LogError(
                 exception,
                 "Error processing Service Bus message {MessageId}. " +
@@ -129,6 +234,10 @@ public sealed class OrderEventWorker(
 
         if (exists)
         {
+            logger.LogInformation(
+                "Inbox message {MessageId} was already processed.",
+                messageId);
+
             return;
         }
 

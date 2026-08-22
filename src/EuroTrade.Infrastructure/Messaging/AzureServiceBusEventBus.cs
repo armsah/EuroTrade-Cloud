@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using System.Text.Json;
+
 using Azure.Messaging.ServiceBus;
+
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
 
@@ -13,6 +16,7 @@ public sealed class AzureServiceBusEventBus(
 
     public async Task PublishAsync<T>(
         T message,
+        string? messageId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -35,8 +39,28 @@ public sealed class AzureServiceBusEventBus(
             ContentType = "application/json"
         };
 
+        if (!string.IsNullOrWhiteSpace(messageId))
+        {
+            serviceBusMessage.MessageId = messageId;
+        }
+
         serviceBusMessage.ApplicationProperties["eventType"] =
             eventType;
+
+        var activity = Activity.Current;
+
+        if (activity is not null)
+        {
+            serviceBusMessage.ApplicationProperties["Diagnostic-Id"] =
+                activity.Id;
+
+            if (!string.IsNullOrWhiteSpace(
+                    activity.TraceStateString))
+            {
+                serviceBusMessage.ApplicationProperties["TraceState"] =
+                    activity.TraceStateString;
+            }
+        }
 
         await sender.SendMessageAsync(
             serviceBusMessage,
