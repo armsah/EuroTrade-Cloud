@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Text.Json;
 
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
+using EuroTrade.Application.Telemetry;
 
 using EuroTrade.Infrastructure.Persistence;
 using EuroTrade.Infrastructure.Persistence.Outbox;
@@ -120,6 +122,35 @@ public sealed class OutboxPublisher(
                                     $"Could not deserialize outbox " +
                                     $"message {message.Id}.");
 
+                            var parentContext =
+                                CreateParentContext(message);
+
+                            using var activity =
+                                EuroTradeActivitySource.Source.StartActivity(
+                                    "PublishOrderCreated",
+                                    ActivityKind.Producer,
+                                    parentContext);
+
+                            activity?.SetTag(
+                                "messaging.system",
+                                "azure_service_bus");
+
+                            activity?.SetTag(
+                                "messaging.destination.name",
+                                "order-created");
+
+                            activity?.SetTag(
+                                "messaging.message.id",
+                                message.Id.ToString());
+
+                            activity?.SetTag(
+                                "order.id",
+                                orderCreated.OrderId);
+
+                            activity?.SetTag(
+                                "order.tenant_id",
+                                orderCreated.TenantId);
+
                             await eventBus.PublishAsync(
                                 orderCreated,
                                 message.Id.ToString(),
@@ -132,6 +163,9 @@ public sealed class OutboxPublisher(
 
                             await dbContext.SaveChangesAsync(
                                 cancellationToken);
+
+                            activity?.SetStatus(
+                                ActivityStatusCode.Ok);
 
                             logger.LogInformation(
                                 "Published outbox message {MessageId}. " +
@@ -181,5 +215,22 @@ public sealed class OutboxPublisher(
                     message.Id);
             }
         }
+    }
+
+    private static ActivityContext CreateParentContext(
+        OutboxMessage message)
+    {
+        if (!string.IsNullOrWhiteSpace(message.TraceParent))
+        {
+            if (ActivityContext.TryParse(
+                    message.TraceParent,
+                    message.TraceState,
+                    out var parentContext))
+            {
+                return parentContext;
+            }
+        }
+
+        return default;
     }
 }

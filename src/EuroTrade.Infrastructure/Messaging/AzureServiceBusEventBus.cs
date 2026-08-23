@@ -33,11 +33,12 @@ public sealed class AzureServiceBusEventBus(
             message,
             JsonOptions);
 
-        var serviceBusMessage = new ServiceBusMessage(body)
-        {
-            Subject = eventType,
-            ContentType = "application/json"
-        };
+        var serviceBusMessage =
+            new ServiceBusMessage(body)
+            {
+                Subject = eventType,
+                ContentType = "application/json"
+            };
 
         if (!string.IsNullOrWhiteSpace(messageId))
         {
@@ -51,6 +52,7 @@ public sealed class AzureServiceBusEventBus(
 
         if (activity is not null)
         {
+            // W3C trace context.
             serviceBusMessage.ApplicationProperties["Diagnostic-Id"] =
                 activity.Id;
 

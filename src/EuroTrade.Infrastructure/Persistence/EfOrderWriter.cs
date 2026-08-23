@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+
 using EuroTrade.Application.Orders;
 using EuroTrade.Application.Orders.Events;
 using EuroTrade.Domain.Orders;
@@ -17,14 +19,25 @@ public sealed class EfOrderWriter(
         OrderCreated orderCreated,
         CancellationToken cancellationToken = default)
     {
+        var currentActivity = Activity.Current;
+
         var outboxMessage = new OutboxMessage
         {
             Id = Guid.NewGuid(),
+
             MessageType = nameof(OrderCreated),
+
             Payload = JsonSerializer.Serialize(
                 orderCreated,
                 JsonOptions),
-            CreatedAt = DateTimeOffset.UtcNow
+
+            CreatedAt = DateTimeOffset.UtcNow,
+
+            // Persist the W3C trace context so the asynchronous
+            // outbox publisher can continue the original trace.
+            TraceParent = currentActivity?.Id,
+
+            TraceState = currentActivity?.TraceStateString
         };
 
         await using var transaction =
@@ -34,8 +47,10 @@ public sealed class EfOrderWriter(
         dbContext.Orders.Add(order);
         dbContext.OutboxMessages.Add(outboxMessage);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await dbContext.SaveChangesAsync(
+            cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
+        await transaction.CommitAsync(
+            cancellationToken);
     }
 }

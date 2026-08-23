@@ -1,9 +1,13 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+
 using Azure.Messaging.ServiceBus;
+
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
+
 using EuroTrade.Infrastructure.Persistence;
+
 using Microsoft.EntityFrameworkCore;
 
 namespace EuroTrade.Infrastructure.Messaging;
@@ -26,9 +30,10 @@ public sealed class AzureServiceBusEventConsumer(
 
             try
             {
-                message = await receiver.ReceiveMessageAsync(
-                    TimeSpan.FromSeconds(5),
-                    cancellationToken);
+                message =
+                    await receiver.ReceiveMessageAsync(
+                        TimeSpan.FromSeconds(5),
+                        cancellationToken);
             }
             catch (OperationCanceledException)
                 when (cancellationToken.IsCancellationRequested)

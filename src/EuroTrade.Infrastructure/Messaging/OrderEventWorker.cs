@@ -59,7 +59,7 @@ public sealed class OrderEventWorker(
 
                     // Backwards-compatible fallback for any direct
                     // in-memory OrderCreated messages that do not
-                    // have a message ID.
+                    // contain a message ID or trace context.
                     logger.LogInformation(
                         "OrderCreated event consumed in memory. " +
                         "OrderId: {OrderId}, TenantId: {TenantId}",
@@ -92,6 +92,39 @@ public sealed class OrderEventWorker(
             return;
         }
 
+        var parentContext = default(ActivityContext);
+
+        if (!string.IsNullOrWhiteSpace(
+                publishedEvent.TraceParent))
+        {
+            ActivityContext.TryParse(
+                publishedEvent.TraceParent,
+                publishedEvent.TraceState,
+                out parentContext);
+        }
+
+        using var activity =
+            EuroTradeActivitySource.Source.StartActivity(
+                "ProcessOrderCreated",
+                ActivityKind.Consumer,
+                parentContext);
+
+        activity?.SetTag(
+            "messaging.system",
+            "in_memory");
+
+        activity?.SetTag(
+            "messaging.message.id",
+            publishedEvent.MessageId);
+
+        activity?.SetTag(
+            "order.id",
+            orderCreated.OrderId);
+
+        activity?.SetTag(
+            "order.tenant_id",
+            orderCreated.TenantId);
+
         logger.LogInformation(
             "OrderCreated event consumed in memory. " +
             "OrderId: {OrderId}, TenantId: {TenantId}, " +
@@ -108,12 +141,35 @@ public sealed class OrderEventWorker(
                 "does not contain a message ID.",
                 orderCreated.OrderId);
 
+            activity?.SetStatus(
+                ActivityStatusCode.Error,
+                "Missing message ID.");
+
             return;
         }
 
-        await RecordInboxMessageAsync(
-            publishedEvent.MessageId,
-            cancellationToken);
+        try
+        {
+            await RecordInboxMessageAsync(
+                publishedEvent.MessageId,
+                cancellationToken);
+
+            activity?.SetStatus(
+                ActivityStatusCode.Ok);
+        }
+        catch (Exception exception)
+        {
+            activity?.SetStatus(
+                ActivityStatusCode.Error,
+                exception.Message);
+
+            logger.LogError(
+                exception,
+                "Error processing in-memory message {MessageId}.",
+                publishedEvent.MessageId);
+
+            throw;
+        }
     }
 
     private async Task ProcessServiceBusEventAsync(
@@ -125,13 +181,25 @@ public sealed class OrderEventWorker(
 
         if (consumedEvent.Message.ApplicationProperties.TryGetValue(
                 "Diagnostic-Id",
-                out var diagnosticIdValue)
-            && diagnosticIdValue is string diagnosticId)
+                out var diagnosticIdValue))
         {
-            ActivityContext.TryParse(
-                diagnosticId,
-                null,
-                out parentContext);
+            var diagnosticId =
+                diagnosticIdValue?.ToString();
+
+            var traceState =
+                consumedEvent.Message.ApplicationProperties.TryGetValue(
+                    "TraceState",
+                    out var traceStateValue)
+                        ? traceStateValue?.ToString()
+                        : null;
+
+            if (!string.IsNullOrWhiteSpace(diagnosticId))
+            {
+                ActivityContext.TryParse(
+                    diagnosticId,
+                    traceState,
+                    out parentContext);
+            }
         }
 
         using var activity =
@@ -165,6 +233,18 @@ public sealed class OrderEventWorker(
                     activity?.SetTag(
                         "order.tenant_id",
                         orderCreated.TenantId);
+
+                    activity?.SetTag(
+                        "order.customer_id",
+                        orderCreated.CustomerId);
+
+                    activity?.SetTag(
+                        "order.product_id",
+                        orderCreated.ProductId);
+
+                    activity?.SetTag(
+                        "order.quantity",
+                        orderCreated.Quantity);
 
                     logger.LogInformation(
                         "OrderCreated event consumed. " +
@@ -229,7 +309,8 @@ public sealed class OrderEventWorker(
 
         var exists =
             await dbContext.InboxMessages.AnyAsync(
-                inbox => inbox.MessageId == messageId,
+                inbox =>
+                    inbox.MessageId == messageId,
                 cancellationToken);
 
         if (exists)

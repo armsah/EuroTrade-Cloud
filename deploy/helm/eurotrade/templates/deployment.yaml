@@ -45,13 +45,6 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
 
-            # PostgreSQL connection string
-            - name: ConnectionStrings__OrdersDb
-              valueFrom:
-                secretKeyRef:
-                  name: eurotrade-ordersdb
-                  key: connectionString
-
           livenessProbe:
             httpGet:
               path: {{ .Values.probes.path }}

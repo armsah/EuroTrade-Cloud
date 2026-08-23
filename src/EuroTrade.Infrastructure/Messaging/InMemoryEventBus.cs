@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -22,10 +23,14 @@ public sealed class InMemoryEventBus : IEventBus, IEventConsumer
     {
         ArgumentNullException.ThrowIfNull(message);
 
+        var activity = Activity.Current;
+
         await _channel.Writer.WriteAsync(
             new InMemoryPublishedEvent(
                 message,
-                messageId),
+                messageId,
+                activity?.Id,
+                activity?.TraceStateString),
             cancellationToken);
     }
 
@@ -50,5 +55,7 @@ public sealed class InMemoryEventBus : IEventBus, IEventConsumer
 
     public sealed record InMemoryPublishedEvent(
         object Message,
-        string? MessageId);
+        string? MessageId,
+        string? TraceParent,
+        string? TraceState);
 }

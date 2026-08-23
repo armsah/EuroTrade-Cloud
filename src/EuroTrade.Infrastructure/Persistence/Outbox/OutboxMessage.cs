@@ -13,4 +13,10 @@ public sealed class OutboxMessage
     public DateTimeOffset? PublishedAt { get; set; }
 
     public string? Error { get; set; }
+
+    // W3C distributed-tracing context captured when the
+    // business operation creates the outbox message.
+    public string? TraceParent { get; set; }
+
+    public string? TraceState { get; set; }
 }

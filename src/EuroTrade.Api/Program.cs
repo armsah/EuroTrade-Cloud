@@ -12,18 +12,26 @@ AppContext.SetSwitch(
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ============================================================
+// Azure Key Vault
+// ============================================================
+
 var keyVaultName =
     builder.Configuration["KeyVault:Name"];
 
 if (!string.IsNullOrWhiteSpace(keyVaultName))
 {
-    var keyVaultUri = new Uri(
-        $"https://{keyVaultName}.vault.azure.net/");
+    var keyVaultUri =
+        new Uri($"https://{keyVaultName}.vault.azure.net/");
 
     builder.Configuration.AddAzureKeyVault(
         keyVaultUri,
         new DefaultAzureCredential());
 }
+
+// ============================================================
+// Authentication / Authorization
+// ============================================================
 
 var azureAdClientId =
     builder.Configuration["AzureAd:ClientId"];
@@ -31,19 +39,28 @@ var azureAdClientId =
 if (!string.IsNullOrWhiteSpace(azureAdClientId))
 {
     builder.Services
-        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddAuthentication(
+            JwtBearerDefaults.AuthenticationScheme)
         .AddMicrosoftIdentityWebApi(
-            builder.Configuration,
-            "AzureAd");
+            builder.Configuration.GetSection("AzureAd"),
+            subscribeToJwtBearerMiddlewareDiagnosticsEvents: true);
 }
 
 builder.Services.AddAuthorization();
+
+// ============================================================
+// Application / Infrastructure
+// ============================================================
 
 builder.Services.AddInfrastructure(
     builder.Configuration);
 
 builder.Services.AddScoped<CreateOrderService>();
 builder.Services.AddScoped<GetOrderService>();
+
+// ============================================================
+// Application Insights / Azure Monitor
+// ============================================================
 
 var applicationInsightsConnectionString =
     builder.Configuration[
@@ -74,14 +91,22 @@ if (!string.IsNullOrWhiteSpace(
         });
 }
 
+// ============================================================
+// Build application
+// ============================================================
+
 var app = builder.Build();
 
-if (!string.IsNullOrWhiteSpace(azureAdClientId))
-{
-    app.UseAuthentication();
-}
+// ============================================================
+// Authentication / Authorization middleware
+// ============================================================
 
+app.UseAuthentication();
 app.UseAuthorization();
+
+// ============================================================
+// Health endpoint
+// ============================================================
 
 app.MapGet(
     "/health",
@@ -91,6 +116,10 @@ app.MapGet(
             {
                 status = "healthy"
             }));
+
+// ============================================================
+// Create order
+// ============================================================
 
 app.MapPost(
     "/api/orders",
@@ -127,6 +156,10 @@ app.MapPost(
     })
     .RequireAuthorization();
 
+// ============================================================
+// Get order
+// ============================================================
+
 app.MapGet(
     "/api/orders/{orderId:guid}",
     async (
@@ -161,6 +194,10 @@ app.MapGet(
             });
     })
     .RequireAuthorization();
+
+// ============================================================
+// Run application
+// ============================================================
 
 app.Run();
 
