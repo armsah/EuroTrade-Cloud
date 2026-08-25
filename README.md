@@ -1,6 +1,6 @@
 # EuroTrade Cloud
 
-**Production-grade multi-tenant B2B order platform for European companies.**
+**Production-oriented multi-tenant B2B order platform for European companies.**
 
 ## 1. What problem is solved?
 
@@ -19,7 +19,7 @@ The platform addresses:
 * Private connectivity for sensitive Azure services
 * Distributed observability with OpenTelemetry and Application Insights
 
-The project is intentionally designed as a **portfolio-grade production reference**, with infrastructure that can be recreated and destroyed to control cloud costs.
+The project is intentionally designed as a **portfolio-grade production reference architecture**. The deployed Azure environment uses a cost-optimized development/demo configuration that can be recreated and destroyed to control cloud costs, while the infrastructure and application design demonstrate patterns that can be extended for production deployments.
 
 ## 2. What is the architecture?
 
@@ -79,7 +79,7 @@ The project focuses on engineering problems that go beyond basic CRUD developmen
 * **Distributed workflows:** order processing is designed around asynchronous events and Saga-style compensation.
 * **Failure handling:** retries, timeouts, dead-letter handling and compensation are part of the architecture.
 * **Cloud security:** Azure RBAC, managed identity, Workload Identity and Key Vault eliminate application-managed cloud credentials.
-* **Private networking:** PostgreSQL and Key Vault are accessed through private connectivity in the production-reference topology.
+* **Private networking:** PostgreSQL and Key Vault are accessed through private connectivity in the Azure reference architecture.
 * **Distributed tracing:** OpenTelemetry propagates correlation/trace context through application and messaging boundaries.
 * **Testability:** domain, application, architecture, integration and end-to-end tests validate the system at multiple levels.
 * **Operational discipline:** Azure resources are provisioned as infrastructure and can be destroyed after demonstrations to avoid unnecessary cloud costs.
@@ -132,6 +132,36 @@ The Azure environment is defined through the project's infrastructure and deploy
 
 Azure resources are **not intended to remain running continuously for the portfolio demo**. The environment can be provisioned for demonstration, inspected, and then destroyed to minimize costs.
 
+### Availability and production topology
+
+The provisioned Azure environment is intentionally a **cost-optimized development/demo configuration**, not a claim of full infrastructure-level high availability.
+
+At the application and Kubernetes level, the project demonstrates several resilience practices:
+
+* Multiple API replicas
+* Kubernetes liveness and readiness probes
+* CPU and memory requests and limits
+* Rolling deployment configuration
+* PodDisruptionBudget
+* Stateless API containers
+* Transactional Outbox and durable Inbox/idempotency patterns for messaging reliability
+
+These controls improve workload resilience, but multiple application replicas alone do not guarantee node-level high availability. In a single-node AKS configuration, multiple pods may still run on the same underlying node, so loss of that node can make all replicas unavailable.
+
+A production deployment would extend the current topology according to its availability requirements, typically including:
+
+* Multiple AKS worker nodes
+* Multiple availability zones where supported and required
+* AKS Cluster Autoscaler
+* Kubernetes Horizontal Pod Autoscaler (HPA)
+* Topology spread constraints or pod anti-affinity to distribute replicas across nodes or zones
+* Production PostgreSQL high availability, backups and tested recovery procedures
+* Capacity, disruption and failover testing against defined availability objectives
+
+These additional resources are intentionally not provisioned solely for the portfolio demonstration because doing so would increase recurring Azure costs without materially improving the architectural demonstration.
+
+The software and infrastructure-as-code demonstrate **production-oriented patterns**; the actual demo environment is deliberately **cost-optimized** and is not represented as highly available.
+
 ### Inspect the P9 observability implementation
 
 P9 adds OpenTelemetry instrumentation and Azure Application Insights integration.
@@ -158,5 +188,5 @@ See the repository's architecture, observability and evidence documentation for 
 | P10+   | Load/failure testing, SLOs and CI/CD hardening                     |
 
 **Previous milestone:** `Complete P8 private connectivity architecture`
-**Current milestone:** `Complete P9 event-driven order processing and observability`
 
+**Current milestone:** `Complete P9 event-driven order processing and observability`
