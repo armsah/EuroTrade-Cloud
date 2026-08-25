@@ -1,9 +1,12 @@
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
+
 using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders;
+
 using EuroTrade.Infrastructure.Messaging;
 using EuroTrade.Infrastructure.Persistence;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,40 +26,50 @@ public static class DependencyInjection
 
         if (configuration["Database:Provider"] == "Sqlite")
         {
-            services.AddDbContextFactory<OrdersDbContext>(options =>
-                options.UseSqlite(connectionString));
+            services.AddDbContextFactory<OrdersDbContext>(
+                options =>
+                    options.UseSqlite(
+                        connectionString));
         }
         else
         {
-            services.AddDbContextFactory<OrdersDbContext>(options =>
-                options.UseNpgsql(connectionString));
+            services.AddDbContextFactory<OrdersDbContext>(
+                options =>
+                    options.UseNpgsql(
+                        connectionString));
         }
 
         services.AddScoped<IOrderRepository, EfOrderRepository>();
         services.AddScoped<IOrderWriter, EfOrderWriter>();
 
         var serviceBusNamespace =
-            configuration["ServiceBus:FullyQualifiedNamespace"];
+            configuration[
+                "ServiceBus:FullyQualifiedNamespace"];
 
         var queueName =
-            configuration["ServiceBus:QueueName"];
+            configuration[
+                "ServiceBus:QueueName"];
 
-        // Local development and E2E test fallback.
-        // When Azure Service Bus is not configured, use the
-        // in-memory event bus while keeping the same
-        // Outbox -> EventBus -> Consumer -> Inbox processing flow.
-        if (string.IsNullOrWhiteSpace(serviceBusNamespace) ||
-            string.IsNullOrWhiteSpace(queueName))
+        // ====================================================
+        // Local development / E2E path
+        // ====================================================
+
+        if (string.IsNullOrWhiteSpace(
+                serviceBusNamespace) ||
+            string.IsNullOrWhiteSpace(
+                queueName))
         {
             services.AddSingleton<InMemoryEventBus>();
 
             services.AddSingleton<IEventBus>(
                 provider =>
-                    provider.GetRequiredService<InMemoryEventBus>());
+                    provider.GetRequiredService<
+                        InMemoryEventBus>());
 
             services.AddSingleton<IEventConsumer>(
                 provider =>
-                    provider.GetRequiredService<InMemoryEventBus>());
+                    provider.GetRequiredService<
+                        InMemoryEventBus>());
 
             services.AddHostedService<OrderEventWorker>();
             services.AddHostedService<OutboxPublisher>();
@@ -64,28 +77,60 @@ public static class DependencyInjection
             return services;
         }
 
-        // Production/Azure path.
-        // AKS uses the Service Bus namespace together with
-        // Azure Workload Identity and DefaultAzureCredential.
+        // ====================================================
+        // Azure Service Bus production path
+        // ====================================================
+
         var serviceBusClient =
             new ServiceBusClient(
                 serviceBusNamespace,
                 new DefaultAzureCredential());
 
-        services.AddSingleton(serviceBusClient);
+        services.AddSingleton(
+            serviceBusClient);
+
+        var sender =
+            serviceBusClient.CreateSender(
+                queueName);
 
         services.AddSingleton(
-            serviceBusClient.CreateSender(queueName));
+            sender);
+
+        services.AddSingleton<
+            IEventBus,
+            AzureServiceBusEventBus>();
+
+        var processor =
+            serviceBusClient.CreateProcessor(
+                queueName,
+                new ServiceBusProcessorOptions
+                {
+                    // Settlement is deliberately owned by
+                    // AzureServiceBusOrderProcessor.
+                    AutoCompleteMessages = false,
+
+                    ReceiveMode =
+                        ServiceBusReceiveMode.PeekLock,
+
+                    // Keep processing deterministic initially.
+                    // This can be increased after measuring
+                    // throughput and DB contention.
+                    MaxConcurrentCalls = 1,
+
+                    // Allow long-running handlers to retain
+                    // their Peek-Lock while processing.
+                    MaxAutoLockRenewalDuration =
+                        TimeSpan.FromMinutes(5)
+                });
 
         services.AddSingleton(
-            serviceBusClient.CreateReceiver(queueName));
+            processor);
 
-        services.AddSingleton<IEventBus, AzureServiceBusEventBus>();
+        services.AddHostedService<
+            AzureServiceBusOrderProcessor>();
 
-        services.AddSingleton<IEventConsumer, AzureServiceBusEventConsumer>();
-
-        services.AddHostedService<OrderEventWorker>();
-        services.AddHostedService<OutboxPublisher>();
+        services.AddHostedService<
+            OutboxPublisher>();
 
         return services;
     }

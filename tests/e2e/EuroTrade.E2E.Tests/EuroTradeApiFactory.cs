@@ -43,6 +43,21 @@ public sealed class EuroTradeApiFactory
                 "Cache=Shared;");
 
         _connection.Open();
+
+        InitializeDatabase();
+    }
+
+    private void InitializeDatabase()
+    {
+        var options =
+            new DbContextOptionsBuilder<OrdersDbContext>()
+                .UseSqlite(_connection)
+                .Options;
+
+        using var db =
+            new OrdersDbContext(options);
+
+        db.Database.EnsureCreated();
     }
 
     protected override void ConfigureWebHost(
