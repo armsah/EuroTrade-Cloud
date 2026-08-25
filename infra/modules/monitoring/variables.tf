@@ -18,3 +18,8 @@ variable "tags" {
   description = "Resource tags."
   default     = {}
 }
+
+variable "application_insights_name" {
+  type        = string
+  description = "Application Insights resource name."
+}

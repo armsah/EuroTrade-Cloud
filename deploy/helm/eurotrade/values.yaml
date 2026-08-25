@@ -51,13 +51,15 @@ serviceAccount:
   automount: true
 
   annotations:
-    azure.workload.identity/client-id: "f2ea425e-d151-4941-bc0d-52d8eaf8def5"
+    azureWorkloadIdentityClientId: "fb58f35c-04a3-49ca-9490-d412fab74380"
 
 env:
   ASPNETCORE_ENVIRONMENT: Production
+
   KeyVault__Name: eurotradedevkv
-  ServiceBus__FullyQualifiedNamespace: sb-eurotrade-dev.servicebus.windows.net
-  ServiceBus__QueueName: order-created
+
+  ServiceBus__FullyQualifiedNamespace: eurotradedevservicebus.servicebus.windows.net
+  ServiceBus__QueueName: orders
 
 postgres:
   host: eurotrade-dev-postgresql.postgres.database.azure.com

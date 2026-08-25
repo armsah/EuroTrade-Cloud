@@ -33,3 +33,8 @@ variable "tags" {
   description = "Tags applied to private networking resources."
   default     = {}
 }
+
+variable "service_bus_id" {
+  type        = string
+  description = "Azure Service Bus namespace resource ID."
+}

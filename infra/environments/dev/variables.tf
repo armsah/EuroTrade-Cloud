@@ -31,3 +31,15 @@ variable "postgres_admin_password" {
   sensitive   = true
   description = "PostgreSQL administrator password supplied through TF_VAR_postgres_admin_password."
 }
+
+variable "kubernetes_namespace" {
+  type        = string
+  description = "Kubernetes namespace used by the EuroTrade workload."
+  default     = "default"
+}
+
+variable "kubernetes_service_account_name" {
+  type        = string
+  description = "Kubernetes service account used by the EuroTrade workload."
+  default     = "eurotrade"
+}

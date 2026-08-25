@@ -39,10 +39,30 @@ module "key_vault" {
 module "monitoring" {
   source = "../../modules/monitoring"
 
-  name                = "law-${local.name_prefix}"
+  name                      = "law-${local.name_prefix}"
+  application_insights_name = "appi-${local.name_prefix}"
+
   resource_group_name = module.resource_group.name
   location            = module.resource_group.location
-  tags                = local.tags
+
+  tags = local.tags
+}
+
+module "service_bus" {
+  source = "../../modules/service-bus"
+
+  name = replace(
+    "${var.project_name}-${var.environment}-servicebus",
+    "-",
+    ""
+  )
+
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+
+  queue_name = "orders"
+
+  tags = local.tags
 }
 
 module "network" {
@@ -52,8 +72,8 @@ module "network" {
   resource_group_name = module.resource_group.name
   location            = module.resource_group.location
 
-  address_space                 = ["10.20.0.0/16"]
-  aks_subnet_prefixes           = ["10.20.1.0/24"]
+  address_space                    = ["10.20.0.0/16"]
+  aks_subnet_prefixes              = ["10.20.1.0/24"]
   private_endpoint_subnet_prefixes = ["10.20.2.0/24"]
 
   tags = local.tags
@@ -72,6 +92,21 @@ module "aks" {
   log_analytics_workspace_id = module.monitoring.id
 
   subnet_id = module.network.aks_subnet_id
+
+  tags = local.tags
+}
+
+module "workload_identity" {
+  source = "../../modules/workload-identity"
+
+  name                = "id-${local.name_prefix}"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+
+  oidc_issuer_url = module.aks.oidc_issuer_url
+
+  kubernetes_namespace = var.kubernetes_namespace
+  service_account_name = var.kubernetes_service_account_name
 
   tags = local.tags
 }
@@ -101,8 +136,9 @@ module "private_connectivity" {
   vnet_id                    = module.network.id
   private_endpoint_subnet_id = module.network.private_endpoint_subnet_id
 
-  key_vault_id = module.key_vault.id
-  postgresql_id = module.postgresql.id
+  key_vault_id   = module.key_vault.id
+  postgresql_id  = module.postgresql.id
+  service_bus_id = module.service_bus.id
 
   tags = local.tags
 }

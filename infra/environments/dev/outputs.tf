@@ -33,3 +33,44 @@ output "postgresql_fqdn" {
 output "postgresql_database_name" {
   value = module.postgresql.database_name
 }
+
+output "aks_name" {
+  value = module.aks.name
+}
+
+output "service_bus_namespace_name" {
+  value = module.service_bus.name
+}
+
+output "service_bus_fully_qualified_namespace" {
+  value = module.service_bus.fully_qualified_namespace
+}
+
+output "service_bus_queue_name" {
+  value = module.service_bus.queue_name
+}
+
+output "workload_identity_name" {
+  value = module.workload_identity.name
+}
+
+output "workload_identity_client_id" {
+  value = module.workload_identity.client_id
+}
+
+output "application_insights_name" {
+  value = module.monitoring.application_insights_name
+}
+
+output "application_insights_connection_string" {
+  value     = module.monitoring.application_insights_connection_string
+  sensitive = true
+}
+
+output "kubernetes_namespace" {
+  value = var.kubernetes_namespace
+}
+
+output "kubernetes_service_account_name" {
+  value = var.kubernetes_service_account_name
+}
