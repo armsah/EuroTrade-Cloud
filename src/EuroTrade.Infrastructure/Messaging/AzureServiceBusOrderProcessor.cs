@@ -19,6 +19,7 @@ namespace EuroTrade.Infrastructure.Messaging;
 public sealed class AzureServiceBusOrderProcessor(
     ServiceBusProcessor processor,
     IDbContextFactory<OrdersDbContext> dbContextFactory,
+    InboxMessageStore inboxMessageStore,
     IConfiguration configuration,
     ILogger<AzureServiceBusOrderProcessor> logger)
     : IHostedService
@@ -97,29 +98,6 @@ public sealed class AzureServiceBusOrderProcessor(
 
         try
         {
-            // ================================================
-            // Idempotency / duplicate handling
-            // ================================================
-
-            if (await InboxMessageExistsAsync(
-                    message.MessageId,
-                    cancellationToken))
-            {
-                logger.LogInformation(
-                    "Service Bus message {MessageId} " +
-                    "was already processed. Completing duplicate.",
-                    message.MessageId);
-
-                await args.CompleteMessageAsync(
-                    message,
-                    cancellationToken);
-
-                activity?.SetStatus(
-                    ActivityStatusCode.Ok);
-
-                return;
-            }
-
             // ================================================
             // Deserialize / validate
             // ================================================
@@ -330,67 +308,32 @@ public sealed class AzureServiceBusOrderProcessor(
             throw new InvalidOperationException(
                 "Intentional P6 retry/DLQ test failure.");
         }
-
-        await RecordInboxMessageAsync(
-            message.MessageId,
-            cancellationToken);
-    }
-
-    private async Task<bool> InboxMessageExistsAsync(
-        string messageId,
-        CancellationToken cancellationToken)
-    {
-        await using var dbContext =
-            await dbContextFactory.CreateDbContextAsync(
+        var recorded =
+            await RecordInboxMessageAsync(
+                message.MessageId,
                 cancellationToken);
 
-        return await dbContext.InboxMessages.AnyAsync(
-            inbox =>
-                inbox.MessageId == messageId,
-            cancellationToken);
-    }
-
-    private async Task RecordInboxMessageAsync(
-        string messageId,
-        CancellationToken cancellationToken)
-    {
-        await using var dbContext =
-            await dbContextFactory.CreateDbContextAsync(
-                cancellationToken);
-
-        var exists =
-            await dbContext.InboxMessages.AnyAsync(
-                inbox =>
-                    inbox.MessageId == messageId,
-                cancellationToken);
-
-        if (exists)
+        if (!recorded)
         {
             logger.LogInformation(
-                "Inbox message {MessageId} " +
+                "Service Bus message {MessageId} " +
                 "was already processed.",
-                messageId);
-
-            return;
+                message.MessageId);
         }
+    }
 
-        dbContext.InboxMessages.Add(
-            new InboxMessage
-            {
-                Id =
-                    Guid.NewGuid(),
 
-                MessageId =
-                    messageId,
+    private async Task<bool> RecordInboxMessageAsync(
+      string messageId,
+      CancellationToken cancellationToken)
+    {
+        await using var dbContext =
+            await dbContextFactory.CreateDbContextAsync(
+                cancellationToken);
 
-                ReceivedAt =
-                    DateTimeOffset.UtcNow,
-
-                ProcessedAt =
-                    DateTimeOffset.UtcNow
-            });
-
-        await dbContext.SaveChangesAsync(
+        return await inboxMessageStore.TryRecordAsync(
+            dbContext,
+            messageId,
             cancellationToken);
     }
 

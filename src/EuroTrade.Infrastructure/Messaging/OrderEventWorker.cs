@@ -16,6 +16,7 @@ namespace EuroTrade.Infrastructure.Messaging;
 public sealed class OrderEventWorker(
     IEventConsumer eventConsumer,
     IDbContextFactory<OrdersDbContext> dbContextFactory,
+    InboxMessageStore inboxMessageStore,
     ILogger<OrderEventWorker> logger)
     : BackgroundService
 {
@@ -158,46 +159,25 @@ public sealed class OrderEventWorker(
     }
 
     private async Task RecordInboxMessageAsync(
-        string messageId,
-        CancellationToken cancellationToken)
+       string messageId,
+       CancellationToken cancellationToken)
     {
         await using var dbContext =
             await dbContextFactory.CreateDbContextAsync(
                 cancellationToken);
 
-        var exists =
-            await dbContext.InboxMessages.AnyAsync(
-                inbox =>
-                    inbox.MessageId == messageId,
+        var recorded =
+            await inboxMessageStore.TryRecordAsync(
+                dbContext,
+                messageId,
                 cancellationToken);
 
-        if (exists)
+        if (!recorded)
         {
             logger.LogInformation(
                 "Inbox message {MessageId} " +
                 "was already processed.",
                 messageId);
-
-            return;
         }
-
-        dbContext.InboxMessages.Add(
-            new InboxMessage
-            {
-                Id =
-                    Guid.NewGuid(),
-
-                MessageId =
-                    messageId,
-
-                ReceivedAt =
-                    DateTimeOffset.UtcNow,
-
-                ProcessedAt =
-                    DateTimeOffset.UtcNow
-            });
-
-        await dbContext.SaveChangesAsync(
-            cancellationToken);
     }
 }

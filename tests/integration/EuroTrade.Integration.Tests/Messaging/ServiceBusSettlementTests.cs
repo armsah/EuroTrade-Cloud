@@ -34,6 +34,7 @@ public sealed class ServiceBusSettlementTests
             new AzureServiceBusOrderProcessor(
                 serviceBusProcessor,
                 database.Factory,
+                new InboxMessageStore(),
                 configuration,
                 NullLogger<
                     AzureServiceBusOrderProcessor>.Instance);
@@ -124,6 +125,7 @@ public sealed class ServiceBusSettlementTests
             new AzureServiceBusOrderProcessor(
                 serviceBusProcessor,
                 database.Factory,
+                new InboxMessageStore(),
                 CreateConfiguration(false),
                 NullLogger<
                     AzureServiceBusOrderProcessor>.Instance);
@@ -178,6 +180,7 @@ public sealed class ServiceBusSettlementTests
             new AzureServiceBusOrderProcessor(
                 serviceBusProcessor,
                 database.Factory,
+                new InboxMessageStore(),
                 CreateConfiguration(true),
                 NullLogger<
                     AzureServiceBusOrderProcessor>.Instance);
@@ -243,6 +246,7 @@ public sealed class ServiceBusSettlementTests
             new AzureServiceBusOrderProcessor(
                 serviceBusProcessor,
                 database.Factory,
+                new InboxMessageStore(),
                 CreateConfiguration(false),
                 NullLogger<
                     AzureServiceBusOrderProcessor>.Instance);
@@ -314,6 +318,7 @@ public sealed class ServiceBusSettlementTests
             new AzureServiceBusOrderProcessor(
                 serviceBusProcessor,
                 database.Factory,
+                new InboxMessageStore(),
                 CreateConfiguration(false),
                 NullLogger<
                     AzureServiceBusOrderProcessor>.Instance);

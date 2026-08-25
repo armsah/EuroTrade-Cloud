@@ -9,6 +9,7 @@ using Npgsql;
 
 namespace EuroTrade.Integration.Tests.Messaging;
 
+[Collection("Postgres integration")]
 public sealed class PostgresOutboxConcurrencyTests
 {
     private const string ConnectionStringEnvironmentVariable =

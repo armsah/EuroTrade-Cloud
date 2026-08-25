@@ -6,6 +6,7 @@ using EuroTrade.Application.Orders;
 
 using EuroTrade.Infrastructure.Messaging;
 using EuroTrade.Infrastructure.Persistence;
+using EuroTrade.Infrastructure.Persistence.Inbox;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -59,6 +60,7 @@ public static class DependencyInjection
             string.IsNullOrWhiteSpace(
                 queueName))
         {
+            services.AddSingleton<InboxMessageStore>();
             services.AddSingleton<InMemoryEventBus>();
 
             services.AddSingleton<IEventBus>(
