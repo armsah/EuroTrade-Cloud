@@ -6,6 +6,7 @@ using Azure.Messaging.ServiceBus;
 using EuroTrade.Application.Orders.Events;
 using EuroTrade.Application.Telemetry;
 
+using EuroTrade.Infrastructure.Observability;
 using EuroTrade.Infrastructure.Persistence;
 using EuroTrade.Infrastructure.Persistence.Inbox;
 
@@ -64,6 +65,9 @@ public sealed class AzureServiceBusOrderProcessor(
     private async Task ProcessMessageAsync(
         ProcessMessageEventArgs args)
     {
+        var processingStartedAt =
+            Stopwatch.GetTimestamp();
+
         var message =
             args.Message;
 
@@ -208,9 +212,8 @@ public sealed class AzureServiceBusOrderProcessor(
             // Successful settlement
             // ================================================
 
-            // IMPORTANT:
-            // Processing and inbox persistence happen BEFORE
-            // message completion.
+            // Processing and inbox persistence happen before
+            // the message is completed.
             await args.CompleteMessageAsync(
                 message,
                 cancellationToken);
@@ -257,6 +260,18 @@ public sealed class AzureServiceBusOrderProcessor(
                     "{MessageId}.",
                     message.MessageId);
             }
+        }
+        finally
+        {
+            var elapsed =
+                Stopwatch.GetElapsedTime(
+                    processingStartedAt);
+
+            EuroTradeMetrics.MessageProcessingDuration.Record(
+                elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>(
+                    "messaging.system",
+                    "azure_service_bus"));
         }
     }
 
@@ -308,6 +323,7 @@ public sealed class AzureServiceBusOrderProcessor(
             throw new InvalidOperationException(
                 "Intentional P6 retry/DLQ test failure.");
         }
+
         var recorded =
             await RecordInboxMessageAsync(
                 message.MessageId,
@@ -315,6 +331,12 @@ public sealed class AzureServiceBusOrderProcessor(
 
         if (!recorded)
         {
+            EuroTradeMetrics.InboxDuplicateMessages.Add(
+                1,
+                new KeyValuePair<string, object?>(
+                    "message.type",
+                    nameof(OrderCreated)));
+
             logger.LogInformation(
                 "Service Bus message {MessageId} " +
                 "was already processed.",
@@ -322,10 +344,9 @@ public sealed class AzureServiceBusOrderProcessor(
         }
     }
 
-
     private async Task<bool> RecordInboxMessageAsync(
-      string messageId,
-      CancellationToken cancellationToken)
+        string messageId,
+        CancellationToken cancellationToken)
     {
         await using var dbContext =
             await dbContextFactory.CreateDbContextAsync(

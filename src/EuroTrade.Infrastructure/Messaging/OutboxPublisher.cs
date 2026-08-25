@@ -5,6 +5,7 @@ using EuroTrade.Application.Messaging;
 using EuroTrade.Application.Orders.Events;
 using EuroTrade.Application.Telemetry;
 
+using EuroTrade.Infrastructure.Observability;
 using EuroTrade.Infrastructure.Persistence;
 using EuroTrade.Infrastructure.Persistence.Outbox;
 
@@ -114,19 +115,33 @@ public sealed class OutboxPublisher(
             scope.ServiceProvider
                 .GetRequiredService<IEventBus>();
 
+        // Capture total outstanding backlog before processing.
+        // This includes messages waiting for their retry delay,
+        // but excludes messages already published or permanently
+        // marked as failed/poison.
+        await UpdatePendingMessagesMetricAsync(
+            dbContext,
+            cancellationToken);
+
         if (dbContext.Database.IsNpgsql())
         {
             await PublishPostgresBatchAsync(
                 dbContext,
                 eventBus,
                 cancellationToken);
-
-            return;
+        }
+        else
+        {
+            await PublishNonPostgresBatchAsync(
+                dbContext,
+                eventBus,
+                cancellationToken);
         }
 
-        await PublishNonPostgresBatchAsync(
+        // Refresh after the batch so the gauge reflects the
+        // resulting backlog rather than only its initial state.
+        await UpdatePendingMessagesMetricAsync(
             dbContext,
-            eventBus,
             cancellationToken);
     }
 
@@ -339,70 +354,70 @@ public sealed class OutboxPublisher(
         switch (message.MessageType)
         {
             case nameof(OrderCreated):
+            {
+                var orderCreated =
+                    JsonSerializer.Deserialize<OrderCreated>(
+                        message.Payload,
+                        JsonOptions)
+                    ?? throw new PermanentOutboxMessageException(
+                        $"Could not deserialize outbox " +
+                        $"message {message.Id}.");
+
+                var parentContext =
+                    CreateParentContext(
+                        message);
+
+                using var activity =
+                    EuroTradeActivitySource.Source.StartActivity(
+                        "PublishOrderCreated",
+                        ActivityKind.Producer,
+                        parentContext);
+
+                activity?.SetTag(
+                    "messaging.system",
+                    "azure_service_bus");
+
+                activity?.SetTag(
+                    "messaging.destination.name",
+                    "order-created");
+
+                activity?.SetTag(
+                    "messaging.message.id",
+                    message.Id.ToString());
+
+                activity?.SetTag(
+                    "outbox.attempt_count",
+                    message.AttemptCount);
+
+                activity?.SetTag(
+                    "order.id",
+                    orderCreated.OrderId);
+
+                activity?.SetTag(
+                    "order.tenant_id",
+                    orderCreated.TenantId);
+
+                try
                 {
-                    var orderCreated =
-                        JsonSerializer.Deserialize<OrderCreated>(
-                            message.Payload,
-                            JsonOptions)
-                        ?? throw new PermanentOutboxMessageException(
-                            $"Could not deserialize outbox " +
-                            $"message {message.Id}.");
+                    await eventBus.PublishAsync(
+                        orderCreated,
+                        message.Id.ToString(),
+                        cancellationToken);
 
-                    var parentContext =
-                        CreateParentContext(
-                            message);
-
-                    using var activity =
-                        EuroTradeActivitySource.Source.StartActivity(
-                            "PublishOrderCreated",
-                            ActivityKind.Producer,
-                            parentContext);
-
-                    activity?.SetTag(
-                        "messaging.system",
-                        "azure_service_bus");
-
-                    activity?.SetTag(
-                        "messaging.destination.name",
-                        "order-created");
-
-                    activity?.SetTag(
-                        "messaging.message.id",
-                        message.Id.ToString());
-
-                    activity?.SetTag(
-                        "outbox.attempt_count",
-                        message.AttemptCount);
-
-                    activity?.SetTag(
-                        "order.id",
-                        orderCreated.OrderId);
-
-                    activity?.SetTag(
-                        "order.tenant_id",
-                        orderCreated.TenantId);
-
-                    try
-                    {
-                        await eventBus.PublishAsync(
-                            orderCreated,
-                            message.Id.ToString(),
-                            cancellationToken);
-
-                        activity?.SetStatus(
-                            ActivityStatusCode.Ok);
-                    }
-                    catch (Exception exception)
-                    {
-                        activity?.SetStatus(
-                            ActivityStatusCode.Error,
-                            exception.Message);
-
-                        throw;
-                    }
-
-                    break;
+                    activity?.SetStatus(
+                        ActivityStatusCode.Ok);
                 }
+                catch (Exception exception)
+                {
+                    activity?.SetStatus(
+                        ActivityStatusCode.Error,
+                        exception.Message);
+
+                    throw;
+                }
+
+                break;
+            }
 
             default:
                 throw new PermanentOutboxMessageException(
@@ -418,6 +433,15 @@ public sealed class OutboxPublisher(
         DateTimeOffset attemptStartedAt,
         CancellationToken cancellationToken)
     {
+        // Count actual event-bus publishing failures.
+        // Message type is bounded-cardinality and safe as
+        // a metric dimension.
+        EuroTradeMetrics.OutboxPublishFailures.Add(
+            1,
+            new KeyValuePair<string, object?>(
+                "message.type",
+                message.MessageType));
+
         message.LastError =
             exception.Message;
 
@@ -498,6 +522,37 @@ public sealed class OutboxPublisher(
             "MessageType: {MessageType}.",
             message.Id,
             message.MessageType);
+    }
+
+    private static async Task UpdatePendingMessagesMetricAsync(
+        OrdersDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        /*
+         * The observable metric itself must remain cheap and
+         * synchronous. Database I/O therefore happens here in
+         * the existing publisher loop, and EuroTradeMetrics
+         * exposes only the most recently sampled value.
+         *
+         * Pending means:
+         *
+         * - not successfully published
+         * - not permanently failed/poison
+         *
+         * Messages waiting for NextAttemptAt are intentionally
+         * included because they remain part of the backlog.
+         */
+        var pendingCount =
+            await dbContext.OutboxMessages
+                .AsNoTracking()
+                .LongCountAsync(
+                    message =>
+                        message.PublishedAt == null &&
+                        message.FailedAt == null,
+                    cancellationToken);
+
+        EuroTradeMetrics.SetOutboxPendingMessages(
+            pendingCount);
     }
 
     private TimeSpan CalculateRetryDelay(

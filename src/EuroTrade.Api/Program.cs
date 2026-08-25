@@ -13,6 +13,10 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Identity.Web;
 
+using EuroTrade.Infrastructure.Observability;
+
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
 AppContext.SetSwitch(
@@ -175,17 +179,51 @@ var applicationInsightsConnectionString =
     ?? builder.Configuration[
         "ApplicationInsights:ConnectionString"];
 
+var serviceVersion =
+    typeof(Program)
+        .Assembly
+        .GetName()
+        .Version?
+        .ToString()
+    ?? "unknown";
+
+var deploymentEnvironment =
+    builder.Environment.EnvironmentName;
+
 var openTelemetry =
     builder.Services
         .AddOpenTelemetry()
-        .WithTracing(tracing =>
-        {
-            tracing
-                .AddSource("EuroTrade.Application")
-                .AddSource("Azure.*")
-                .AddAspNetCoreInstrumentation()
-                .AddHttpClientInstrumentation();
-        });
+        .ConfigureResource(
+            resource =>
+                resource
+                    .AddService(
+                        serviceName: "EuroTrade.Api",
+                        serviceVersion: serviceVersion)
+                    .AddAttributes(
+                    [
+                        new KeyValuePair<string, object>(
+                            "deployment.environment.name",
+                            deploymentEnvironment)
+                    ]))
+        .WithTracing(
+            tracing =>
+            {
+                tracing
+                    .AddSource("EuroTrade.Application")
+                    .AddSource("Azure.*")
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation();
+            })
+        .WithMetrics(
+            metrics =>
+            {
+                metrics
+                    .AddMeter(
+                        EuroTradeMetrics.MeterName)
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation()
+                    .AddRuntimeInstrumentation();
+            });
 
 if (!string.IsNullOrWhiteSpace(
         applicationInsightsConnectionString))

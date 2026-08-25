@@ -6,6 +6,7 @@ using EuroTrade.Application.Orders.Events;
 using EuroTrade.Domain.Orders;
 using EuroTrade.Infrastructure.Persistence.Idempotency;
 using EuroTrade.Infrastructure.Persistence.Outbox;
+using EuroTrade.Infrastructure.Observability;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -119,6 +120,9 @@ public sealed class EfOrderWriter(
 
             await transaction.CommitAsync(
                 cancellationToken);
+
+            EuroTradeMetrics.OrdersCreated.Add(
+                1);
 
             return new OrderWriteResult(
                 order,
