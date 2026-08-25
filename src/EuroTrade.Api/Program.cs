@@ -5,8 +5,11 @@ using EuroTrade.Api.Tenancy;
 using EuroTrade.Application.Orders;
 using EuroTrade.Application.Tenancy;
 using EuroTrade.Infrastructure;
+using EuroTrade.Infrastructure.Health;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Identity.Web;
 
 using OpenTelemetry.Trace;
@@ -79,6 +82,32 @@ builder.Services.AddScoped<
     GetOrderService>();
 
 // ============================================================
+// Health checks
+// ============================================================
+
+builder.Services
+    .AddHealthChecks()
+
+    // Liveness deliberately checks only whether the
+    // ASP.NET process is alive.
+    .AddCheck(
+        "self",
+        () =>
+            HealthCheckResult.Healthy(
+                "Application process is alive."),
+        tags:
+            ["live"])
+
+    // Readiness verifies that this API replica can reach
+    // the Orders database.
+    .AddCheck<PostgresReadinessHealthCheck>(
+        "orders-database",
+        failureStatus:
+            HealthStatus.Unhealthy,
+        tags:
+            ["ready"]);
+
+// ============================================================
 // Application Insights / Azure Monitor
 // ============================================================
 
@@ -126,17 +155,37 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // ============================================================
-// Health endpoint
+// Health endpoints
 // ============================================================
 
-app.MapGet(
-    "/health",
-    () =>
-        Results.Ok(
-            new
-            {
-                status = "healthy"
-            }));
+// Liveness:
+// "Is this process alive?"
+//
+// No database, Service Bus, Key Vault or other external
+// dependency is included here.
+app.MapHealthChecks(
+    "/health/live",
+    new HealthCheckOptions
+    {
+        Predicate =
+            registration =>
+                registration.Tags.Contains(
+                    "live")
+    });
+
+// Readiness:
+// "Can this replica currently serve application traffic?"
+//
+// PostgreSQL/OrdersDb is part of readiness.
+app.MapHealthChecks(
+    "/health/ready",
+    new HealthCheckOptions
+    {
+        Predicate =
+            registration =>
+                registration.Tags.Contains(
+                    "ready")
+    });
 
 // ============================================================
 // Create order
