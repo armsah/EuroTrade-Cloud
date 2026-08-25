@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 
+using EuroTrade.Infrastructure.Persistence;
+
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -9,8 +11,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
-using EuroTrade.Infrastructure.Persistence;
 
 namespace EuroTrade.E2E.Tests;
 
@@ -21,6 +21,12 @@ public sealed class EuroTradeApiFactory
 
     public const string TestTenantHeader =
         "X-Test-Tenant-Id";
+
+    public const string TestScopesHeader =
+        "X-Test-Scopes";
+
+    public const string TestUnauthenticatedHeader =
+        "X-Test-Unauthenticated";
 
     private const string TestDatabaseName =
         "EuroTradeE2E";
@@ -86,6 +92,9 @@ public sealed class EuroTradeApiFactory
                     options.DefaultChallengeScheme =
                         TestAuthenticationScheme;
 
+                    options.DefaultForbidScheme =
+                        TestAuthenticationScheme;
+
                     options.DefaultScheme =
                         TestAuthenticationScheme;
                 })
@@ -102,11 +111,59 @@ public sealed class EuroTradeApiFactory
     public HttpClient CreateClientForTenant(
         Guid tenantId)
     {
-        var client = CreateClient();
+        var client =
+            CreateClient();
 
         client.DefaultRequestHeaders.Add(
             TestTenantHeader,
             tenantId.ToString());
+
+        return client;
+    }
+
+    public HttpClient CreateClientWithScopes(
+        params string[] scopes)
+    {
+        var client =
+            CreateClient();
+
+        client.DefaultRequestHeaders.Add(
+            TestScopesHeader,
+            string.Join(
+                ' ',
+                scopes));
+
+        return client;
+    }
+
+    public HttpClient CreateClientForTenantWithScopes(
+        Guid tenantId,
+        params string[] scopes)
+    {
+        var client =
+            CreateClient();
+
+        client.DefaultRequestHeaders.Add(
+            TestTenantHeader,
+            tenantId.ToString());
+
+        client.DefaultRequestHeaders.Add(
+            TestScopesHeader,
+            string.Join(
+                ' ',
+                scopes));
+
+        return client;
+    }
+
+    public HttpClient CreateUnauthenticatedClient()
+    {
+        var client =
+            CreateClient();
+
+        client.DefaultRequestHeaders.Add(
+            TestUnauthenticatedHeader,
+            "true");
 
         return client;
     }
@@ -176,7 +233,8 @@ public sealed class EuroTradeApiFactory
         }
     }
 
-    protected override void Dispose(bool disposing)
+    protected override void Dispose(
+        bool disposing)
     {
         if (disposing)
         {
@@ -194,13 +252,28 @@ public sealed class EuroTradeApiFactory
             IOptionsMonitor<AuthenticationSchemeOptions> options,
             ILoggerFactory logger,
             UrlEncoder encoder)
-            : base(options, logger, encoder)
+            : base(
+                options,
+                logger,
+                encoder)
         {
         }
 
         protected override Task<AuthenticateResult>
             HandleAuthenticateAsync()
         {
+            if (Request.Headers.TryGetValue(
+                    TestUnauthenticatedHeader,
+                    out var unauthenticatedHeader) &&
+                string.Equals(
+                    unauthenticatedHeader.ToString(),
+                    "true",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(
+                    AuthenticateResult.NoResult());
+            }
+
             var tenantId =
                 DefaultTenantId;
 
@@ -215,21 +288,41 @@ public sealed class EuroTradeApiFactory
                     requestedTenantId;
             }
 
+            var scopes =
+                "Orders.Read Orders.Write";
+
+            if (Request.Headers.TryGetValue(
+                    TestScopesHeader,
+                    out var scopesHeader))
+            {
+                scopes =
+                    scopesHeader.ToString();
+            }
+
             var claims =
-                new[]
+                new List<Claim>
                 {
-                    new Claim(
+                    new(
                         ClaimTypes.NameIdentifier,
                         $"e2e-user-{tenantId}"),
 
-                    new Claim(
+                    new(
                         ClaimTypes.Name,
                         "E2E Test User"),
 
-                    new Claim(
+                    new(
                         "tenant_id",
                         tenantId.ToString())
                 };
+
+            if (!string.IsNullOrWhiteSpace(
+                    scopes))
+            {
+                claims.Add(
+                    new Claim(
+                        "scp",
+                        scopes));
+            }
 
             var identity =
                 new ClaimsIdentity(
@@ -237,7 +330,8 @@ public sealed class EuroTradeApiFactory
                     TestAuthenticationScheme);
 
             var principal =
-                new ClaimsPrincipal(identity);
+                new ClaimsPrincipal(
+                    identity);
 
             var ticket =
                 new AuthenticationTicket(
@@ -245,7 +339,8 @@ public sealed class EuroTradeApiFactory
                     TestAuthenticationScheme);
 
             return Task.FromResult(
-                AuthenticateResult.Success(ticket));
+                AuthenticateResult.Success(
+                    ticket));
         }
     }
 }

@@ -1,6 +1,7 @@
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.Exporter;
 
+using EuroTrade.Api.Authorization;
 using EuroTrade.Api.Tenancy;
 using EuroTrade.Application.Orders;
 using EuroTrade.Application.Tenancy;
@@ -44,23 +45,80 @@ if (!string.IsNullOrWhiteSpace(
 // Authentication / Authorization
 // ============================================================
 
-var azureAdClientId =
-    builder.Configuration["AzureAd:ClientId"];
+var azureAdSection =
+    builder.Configuration.GetSection("AzureAd");
 
-if (!string.IsNullOrWhiteSpace(
-        azureAdClientId))
+var azureAdInstance =
+    azureAdSection["Instance"];
+
+var azureAdTenantId =
+    azureAdSection["TenantId"];
+
+var azureAdClientId =
+    azureAdSection["ClientId"];
+
+var isProduction =
+    builder.Environment.IsProduction();
+
+if (isProduction)
+{
+    var missingSettings =
+        new List<string>();
+
+    if (string.IsNullOrWhiteSpace(
+            azureAdInstance))
+    {
+        missingSettings.Add(
+            "AzureAd:Instance");
+    }
+
+    if (string.IsNullOrWhiteSpace(
+            azureAdTenantId))
+    {
+        missingSettings.Add(
+            "AzureAd:TenantId");
+    }
+
+    if (string.IsNullOrWhiteSpace(
+            azureAdClientId))
+    {
+        missingSettings.Add(
+            "AzureAd:ClientId");
+    }
+
+    if (missingSettings.Count > 0)
+    {
+        throw new InvalidOperationException(
+            "Azure AD authentication configuration is incomplete. " +
+            "The following settings are required in Production: " +
+            string.Join(
+                ", ",
+                missingSettings) +
+            ".");
+    }
+}
+
+var hasAzureAdConfiguration =
+    !string.IsNullOrWhiteSpace(
+        azureAdInstance) &&
+    !string.IsNullOrWhiteSpace(
+        azureAdTenantId) &&
+    !string.IsNullOrWhiteSpace(
+        azureAdClientId);
+
+if (hasAzureAdConfiguration)
 {
     builder.Services
         .AddAuthentication(
             JwtBearerDefaults.AuthenticationScheme)
         .AddMicrosoftIdentityWebApi(
-            builder.Configuration
-                .GetSection("AzureAd"),
+            azureAdSection,
             subscribeToJwtBearerMiddlewareDiagnosticsEvents:
                 true);
 }
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(
+    OrderAuthorization.AddOrderPolicies);
 
 // ============================================================
 // Application / Infrastructure
@@ -252,7 +310,8 @@ app.MapPost(
                 });
         }
     })
-    .RequireAuthorization();
+    .RequireAuthorization(
+        OrderAuthorization.WritePolicy);
 
 // ============================================================
 // Get order
@@ -305,7 +364,8 @@ app.MapGet(
                     order.CreatedAt
             });
     })
-    .RequireAuthorization();
+    .RequireAuthorization(
+        OrderAuthorization.ReadPolicy);
 
 // ============================================================
 // Run application
