@@ -10,6 +10,7 @@ using EuroTrade.Infrastructure.Persistence.Outbox;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -18,10 +19,32 @@ namespace EuroTrade.Infrastructure.Messaging;
 
 public sealed class OutboxPublisher(
     IServiceScopeFactory scopeFactory,
+    IConfiguration configuration,
     ILogger<OutboxPublisher> logger)
     : BackgroundService
 {
     private const int BatchSize = 20;
+
+    private readonly int _maxAttempts =
+        Math.Max(
+            1,
+            configuration.GetValue(
+                "Outbox:MaxAttempts",
+                5));
+
+    private readonly double _baseRetryDelaySeconds =
+        Math.Max(
+            0.1,
+            configuration.GetValue(
+                "Outbox:BaseRetryDelaySeconds",
+                2.0));
+
+    private readonly double _maxRetryDelaySeconds =
+        Math.Max(
+            0.1,
+            configuration.GetValue(
+                "Outbox:MaxRetryDelaySeconds",
+                300.0));
 
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
@@ -30,7 +53,13 @@ public sealed class OutboxPublisher(
         CancellationToken stoppingToken)
     {
         logger.LogInformation(
-            "Outbox publisher started.");
+            "Outbox publisher started. " +
+            "MaxAttempts: {MaxAttempts}, " +
+            "BaseRetryDelaySeconds: {BaseRetryDelaySeconds}, " +
+            "MaxRetryDelaySeconds: {MaxRetryDelaySeconds}",
+            _maxAttempts,
+            _baseRetryDelaySeconds,
+            _maxRetryDelaySeconds);
 
         using var timer =
             new PeriodicTimer(
@@ -71,7 +100,7 @@ public sealed class OutboxPublisher(
             "Outbox publisher stopped.");
     }
 
-    private async Task PublishPendingMessagesAsync(
+    internal async Task PublishPendingMessagesAsync(
         CancellationToken cancellationToken)
     {
         using var scope =
@@ -113,18 +142,19 @@ public sealed class OutboxPublisher(
         try
         {
             /*
-             * The transaction is intentionally kept open while the
-             * selected messages are published.
+             * The transaction remains open while the selected
+             * messages are published.
              *
-             * FOR UPDATE:
-             *     obtains row-level locks for this publisher.
+             * FOR UPDATE locks rows claimed by this replica.
              *
-             * SKIP LOCKED:
-             *     allows another application replica to immediately
-             *     skip this publisher's batch and claim different rows.
+             * SKIP LOCKED allows other replicas to immediately
+             * skip those rows and claim a different batch.
              *
-             * This prevents healthy replicas from concurrently
-             * publishing the same outbox rows.
+             * Retry eligibility additionally excludes:
+             *
+             * - successfully published messages
+             * - poison/failed messages
+             * - messages whose retry delay has not elapsed
              */
             var messages =
                 await dbContext.OutboxMessages
@@ -133,6 +163,11 @@ public sealed class OutboxPublisher(
                         SELECT *
                         FROM outbox_messages
                         WHERE "PublishedAt" IS NULL
+                          AND "FailedAt" IS NULL
+                          AND (
+                              "NextAttemptAt" IS NULL
+                              OR "NextAttemptAt" <= NOW()
+                          )
                         ORDER BY "CreatedAt"
                         LIMIT {BatchSize}
                         FOR UPDATE SKIP LOCKED
@@ -174,29 +209,34 @@ public sealed class OutboxPublisher(
     }
 
     private async Task PublishNonPostgresBatchAsync(
-    OrdersDbContext dbContext,
-    IEventBus eventBus,
-    CancellationToken cancellationToken)
+        OrdersDbContext dbContext,
+        IEventBus eventBus,
+        CancellationToken cancellationToken)
     {
         /*
-         * SQLite is used by local/E2E tests and does not support
-         * PostgreSQL's FOR UPDATE SKIP LOCKED syntax.
+         * SQLite is used by local/E2E tests.
          *
-         * SQLite also cannot translate DateTimeOffset ORDER BY,
-         * so rows are loaded first and ordered in memory.
-         *
-         * Production PostgreSQL uses the transactional claiming
-         * path in PublishPostgresBatchAsync.
+         * SQLite cannot use PostgreSQL FOR UPDATE SKIP LOCKED
+         * and has limited DateTimeOffset query translation,
+         * so retry eligibility and ordering are evaluated
+         * in memory.
          */
+        var now =
+            DateTimeOffset.UtcNow;
+
         var pendingMessages =
             await dbContext.OutboxMessages
                 .Where(message =>
-                    message.PublishedAt == null)
+                    message.PublishedAt == null &&
+                    message.FailedAt == null)
                 .ToListAsync(
                     cancellationToken);
 
         var messages =
             pendingMessages
+                .Where(message =>
+                    message.NextAttemptAt is null ||
+                    message.NextAttemptAt <= now)
                 .OrderBy(message =>
                     message.CreatedAt)
                 .Take(BatchSize)
@@ -217,38 +257,81 @@ public sealed class OutboxPublisher(
     {
         foreach (var message in messages)
         {
+            var attemptStartedAt =
+                DateTimeOffset.UtcNow;
+
+            message.AttemptCount +=
+                1;
+
+            message.LastAttemptAt =
+                attemptStartedAt;
+
             try
             {
                 await PublishMessageAsync(
-                    dbContext,
                     eventBus,
                     message,
                     cancellationToken);
+
+                message.PublishedAt =
+                    DateTimeOffset.UtcNow;
+
+                message.NextAttemptAt =
+                    null;
+
+                message.LastError =
+                    null;
+
+                message.FailedAt =
+                    null;
+
+                await dbContext.SaveChangesAsync(
+                    cancellationToken);
+
+                logger.LogInformation(
+                    "Published outbox message {MessageId}. " +
+                    "MessageType: {MessageType}. " +
+                    "Attempt: {AttemptCount}",
+                    message.Id,
+                    message.MessageType,
+                    message.AttemptCount);
             }
             catch (OperationCanceledException)
                 when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
+            catch (PermanentOutboxMessageException exception)
+            {
+                await MarkPermanentFailureAsync(
+                    dbContext,
+                    message,
+                    exception,
+                    attemptStartedAt,
+                    cancellationToken);
+            }
+            catch (JsonException exception)
+            {
+                await MarkPermanentFailureAsync(
+                    dbContext,
+                    message,
+                    exception,
+                    attemptStartedAt,
+                    cancellationToken);
+            }
             catch (Exception exception)
             {
-                message.Error =
-                    exception.Message;
-
-                await dbContext.SaveChangesAsync(
-                    cancellationToken);
-
-                logger.LogError(
+                await RecordTransientFailureAsync(
+                    dbContext,
+                    message,
                     exception,
-                    "Failed to publish outbox message " +
-                    "{MessageId}. It will be retried.",
-                    message.Id);
+                    attemptStartedAt,
+                    cancellationToken);
             }
         }
     }
 
-    private async Task PublishMessageAsync(
-        OrdersDbContext dbContext,
+    private static async Task PublishMessageAsync(
         IEventBus eventBus,
         OutboxMessage message,
         CancellationToken cancellationToken)
@@ -261,7 +344,7 @@ public sealed class OutboxPublisher(
                         JsonSerializer.Deserialize<OrderCreated>(
                             message.Payload,
                             JsonOptions)
-                        ?? throw new InvalidOperationException(
+                        ?? throw new PermanentOutboxMessageException(
                             $"Could not deserialize outbox " +
                             $"message {message.Id}.");
 
@@ -288,6 +371,10 @@ public sealed class OutboxPublisher(
                         message.Id.ToString());
 
                     activity?.SetTag(
+                        "outbox.attempt_count",
+                        message.AttemptCount);
+
+                    activity?.SetTag(
                         "order.id",
                         orderCreated.OrderId);
 
@@ -302,25 +389,8 @@ public sealed class OutboxPublisher(
                             message.Id.ToString(),
                             cancellationToken);
 
-                        message.PublishedAt =
-                            DateTimeOffset.UtcNow;
-
-                        message.Error =
-                            null;
-
-                        await dbContext.SaveChangesAsync(
-                            cancellationToken);
-
                         activity?.SetStatus(
                             ActivityStatusCode.Ok);
-
-                        logger.LogInformation(
-                            "Published outbox message {MessageId}. " +
-                            "MessageType: {MessageType}. " +
-                            "OrderId: {OrderId}",
-                            message.Id,
-                            message.MessageType,
-                            orderCreated.OrderId);
                     }
                     catch (Exception exception)
                     {
@@ -335,23 +405,142 @@ public sealed class OutboxPublisher(
                 }
 
             default:
-                {
-                    message.Error =
-                        $"Unsupported outbox message type: " +
-                        $"{message.MessageType}";
-
-                    await dbContext.SaveChangesAsync(
-                        cancellationToken);
-
-                    logger.LogError(
-                        "Unsupported outbox message type " +
-                        "{MessageType}. OutboxMessageId: {MessageId}",
-                        message.MessageType,
-                        message.Id);
-
-                    break;
-                }
+                throw new PermanentOutboxMessageException(
+                    $"Unsupported outbox message type: " +
+                    $"{message.MessageType}");
         }
+    }
+
+    private async Task RecordTransientFailureAsync(
+        OrdersDbContext dbContext,
+        OutboxMessage message,
+        Exception exception,
+        DateTimeOffset attemptStartedAt,
+        CancellationToken cancellationToken)
+    {
+        message.LastError =
+            exception.Message;
+
+        if (message.AttemptCount >=
+            _maxAttempts)
+        {
+            message.FailedAt =
+                attemptStartedAt;
+
+            message.NextAttemptAt =
+                null;
+
+            await dbContext.SaveChangesAsync(
+                cancellationToken);
+
+            /*
+             * This critical log is the operational alert hook.
+             * Application Insights / Azure Monitor can alert
+             * on this log level and message.
+             */
+            logger.LogCritical(
+                exception,
+                "Outbox message {MessageId} entered the " +
+                "poison state after {AttemptCount} attempts. " +
+                "MessageType: {MessageType}",
+                message.Id,
+                message.AttemptCount,
+                message.MessageType);
+
+            return;
+        }
+
+        var delay =
+            CalculateRetryDelay(
+                message.AttemptCount);
+
+        message.NextAttemptAt =
+            attemptStartedAt.Add(
+                delay);
+
+        await dbContext.SaveChangesAsync(
+            cancellationToken);
+
+        logger.LogWarning(
+            exception,
+            "Failed to publish outbox message {MessageId}. " +
+            "Attempt {AttemptCount}/{MaxAttempts}. " +
+            "Next retry at {NextAttemptAt}.",
+            message.Id,
+            message.AttemptCount,
+            _maxAttempts,
+            message.NextAttemptAt);
+    }
+
+    private async Task MarkPermanentFailureAsync(
+        OrdersDbContext dbContext,
+        OutboxMessage message,
+        Exception exception,
+        DateTimeOffset attemptStartedAt,
+        CancellationToken cancellationToken)
+    {
+        message.LastError =
+            exception.Message;
+
+        message.FailedAt =
+            attemptStartedAt;
+
+        message.NextAttemptAt =
+            null;
+
+        await dbContext.SaveChangesAsync(
+            cancellationToken);
+
+        logger.LogCritical(
+            exception,
+            "Outbox message {MessageId} entered the " +
+            "poison state because it cannot be processed. " +
+            "MessageType: {MessageType}.",
+            message.Id,
+            message.MessageType);
+    }
+
+    private TimeSpan CalculateRetryDelay(
+        int attemptCount)
+    {
+        /*
+         * Exponential backoff:
+         *
+         * base * 2^(attempt - 1)
+         *
+         * followed by bounded jitter between 80% and
+         * 100% of that value. The result never exceeds
+         * MaxRetryDelaySeconds.
+         */
+        var exponent =
+            Math.Max(
+                0,
+                attemptCount - 1);
+
+        var exponentialDelay =
+            _baseRetryDelaySeconds *
+            Math.Pow(
+                2,
+                Math.Min(
+                    exponent,
+                    30));
+
+        var cappedDelay =
+            Math.Min(
+                exponentialDelay,
+                _maxRetryDelaySeconds);
+
+        var jitterFactor =
+            0.8 +
+            Random.Shared.NextDouble() * 0.2;
+
+        var delaySeconds =
+            Math.Min(
+                cappedDelay * jitterFactor,
+                _maxRetryDelaySeconds);
+
+        return TimeSpan.FromSeconds(
+            delaySeconds);
     }
 
     private static async Task RollbackSafelyAsync(
@@ -366,9 +555,8 @@ public sealed class OutboxPublisher(
         catch
         {
             /*
-             * Preserve the original publishing/database exception.
-             * A rollback failure must not replace the exception that
-             * caused the transaction to fail.
+             * Preserve the original publishing/database
+             * exception if rollback itself fails.
              */
         }
     }
@@ -390,4 +578,8 @@ public sealed class OutboxPublisher(
 
         return default;
     }
+
+    private sealed class PermanentOutboxMessageException(
+        string message)
+        : Exception(message);
 }

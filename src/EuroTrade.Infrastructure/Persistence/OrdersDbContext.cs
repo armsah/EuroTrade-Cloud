@@ -1,4 +1,5 @@
 using EuroTrade.Domain.Orders;
+
 using EuroTrade.Infrastructure.Persistence.Idempotency;
 using EuroTrade.Infrastructure.Persistence.Inbox;
 using EuroTrade.Infrastructure.Persistence.Outbox;
@@ -70,9 +71,17 @@ public sealed class OrdersDbContext(
             entity.Property(message => message.CreatedAt)
                 .IsRequired();
 
+            entity.Property(message => message.AttemptCount)
+                .IsRequired();
+
+            entity.Property(message => message.LastError)
+                .HasColumnName("Error");
+
             entity.HasIndex(message => new
             {
                 message.PublishedAt,
+                message.FailedAt,
+                message.NextAttemptAt,
                 message.CreatedAt
             });
         });
