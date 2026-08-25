@@ -29,6 +29,19 @@ probes:
     failureThreshold: 3
     successThreshold: 1
 
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
 resources:
   requests:
     cpu: 100m

@@ -1,4 +1,5 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
 WORKDIR /src
 
 COPY ["src/EuroTrade.Api/EuroTrade.Api.csproj", "src/EuroTrade.Api/"]
@@ -14,8 +15,10 @@ RUN dotnet publish "src/EuroTrade.Api/EuroTrade.Api.csproj" \
     -c Release \
     -o /app/publish
 
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 
+# Install runtime dependency while still running as root.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
     && rm -rf /var/lib/apt/lists/*
@@ -27,5 +30,8 @@ COPY --from=build /app/publish .
 ENV ASPNETCORE_URLS=http://+:8080
 
 EXPOSE 8080
+
+# .NET Linux images include the built-in non-root "app" user.
+USER app
 
 ENTRYPOINT ["dotnet", "EuroTrade.Api.dll"]

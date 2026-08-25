@@ -28,11 +28,17 @@ spec:
     spec:
       serviceAccountName: {{ include "eurotrade.serviceAccountName" . }}
 
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+
       containers:
         - name: eurotrade-api
 
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
 
           ports:
             - name: http
@@ -50,7 +56,6 @@ spec:
               path: {{ .Values.probes.liveness.path }}
               port: {{ .Values.containerPort }}
               scheme: HTTP
-
             initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
@@ -62,7 +67,6 @@ spec:
               path: {{ .Values.probes.readiness.path }}
               port: {{ .Values.containerPort }}
               scheme: HTTP
-
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
