@@ -178,6 +178,98 @@ The intended evidence is a distributed order trace showing a single order operat
 
 See the repository's architecture, observability and evidence documentation for the corresponding diagrams and trace screenshots.
 
+The observability model combines **distributed traces, structured logs, application metrics and Azure platform metrics**.
+
+#### Distributed tracing
+
+Trace context is preserved across the transactional Outbox boundary. The trace context captured when the Outbox record is created is restored when the message is later published, allowing asynchronous operations to remain correlated with the originating request.
+
+The intended distributed order trace allows a reviewer to inspect:
+
+* Trace ID / correlation
+* API operation
+* Order creation
+* Outbox persistence
+* Outbox publication
+* Azure Service Bus message consumption
+* Downstream processing
+* Timing and dependencies
+
+#### Application metrics
+
+The application exposes business and reliability metrics through OpenTelemetry:
+
+| Metric | Purpose |
+| ------ | ------- |
+| `orders_created_total` | Number of successfully created orders |
+| `outbox_pending_messages` | Current number of unpublished, non-poison Outbox messages |
+| `outbox_publish_failures_total` | Number of failed Outbox publishing attempts |
+| `message_processing_duration` | Duration of asynchronous message processing |
+| `inbox_duplicate_messages_total` | Number of duplicate messages detected by the Inbox/idempotency mechanism |
+| `dead_lettered_messages_total` | Number of messages explicitly dead-lettered by the application |
+
+The Outbox backlog gauge is derived from durable database state. Messages waiting for a retry remain part of the backlog, while successfully published and permanently failed/poison messages are excluded.
+
+#### Azure platform metrics
+
+Infrastructure-owned metrics remain sourced from the Azure services that own that state rather than requiring additional management privileges in the application.
+
+In particular, **dead-letter queue depth is monitored through Azure Service Bus/Azure Monitor**, rather than queried by the application.
+
+This keeps Azure Service Bus management-plane concerns outside the application and preserves the project's least-privilege RBAC model.
+
+Relevant Azure platform telemetry includes:
+
+* Dead-letter queue depth
+* Active message count / queue depth
+* Incoming and outgoing message activity
+* Service Bus server errors
+* Service Bus throttling
+
+Application-level `dead_lettered_messages_total` and Azure Service Bus dead-letter queue depth serve different purposes: the former records application dead-letter actions, while the latter represents the current broker-side DLQ backlog.
+
+#### Common telemetry resource attributes
+
+OpenTelemetry resources include common attributes that allow telemetry to be grouped by service, version and deployment environment:
+
+* `service.name`
+* `service.version`
+* `deployment.environment.name`
+
+Together these attributes make it possible to distinguish telemetry between application versions and environments without introducing high-cardinality dimensions.
+
+The resulting observability model is:
+
+```text
+Application
+    |
+    +--> Distributed traces
+    |
+    +--> Structured logs
+    |
+    +--> Business metrics
+    |      orders_created_total
+    |
+    +--> Reliability metrics
+           outbox_pending_messages
+           outbox_publish_failures_total
+           message_processing_duration
+           inbox_duplicate_messages_total
+           dead_lettered_messages_total
+
+Azure Service Bus / Azure Monitor
+    |
+    +--> Dead-letter queue depth
+    +--> Queue depth
+    +--> Broker errors
+    +--> Throttling
+
+Common OpenTelemetry resource attributes
+    |
+    +--> service.name
+    +--> service.version
+    +--> deployment.environment.name
+
 ### Project status
 
 | Phase  | Focus                                                              |
