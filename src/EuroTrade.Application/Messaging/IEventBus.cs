@@ -7,4 +7,3 @@ public interface IEventBus
         string? messageId = null,
         CancellationToken cancellationToken = default);
 }
-

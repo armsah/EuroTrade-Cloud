@@ -14,12 +14,20 @@ using EuroTrade.Infrastructure.Persistence;
 
 namespace EuroTrade.E2E.Tests;
 
-public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
+public sealed class EuroTradeApiFactory
+    : WebApplicationFactory<Program>
 {
     private const string TestAuthenticationScheme = "Test";
 
+    public const string TestTenantHeader =
+        "X-Test-Tenant-Id";
+
     private const string TestDatabaseName =
         "EuroTradeE2E";
+
+    public static readonly Guid DefaultTenantId =
+        Guid.Parse(
+            "11111111-1111-1111-1111-111111111111");
 
     private readonly SqliteConnection _connection;
 
@@ -28,11 +36,6 @@ public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
 
     public EuroTradeApiFactory()
     {
-        // Shared in-memory SQLite database.
-        //
-        // The connection remains open for the lifetime of this factory.
-        // All EF Core connections using the same URI will therefore use
-        // the same in-memory database.
         _connection =
             new SqliteConnection(
                 $"Data Source=file:{TestDatabaseName};" +
@@ -47,14 +50,6 @@ public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
     {
         builder.UseEnvironment("Testing");
 
-        // Tell the existing production infrastructure registration
-        // to use SQLite instead of PostgreSQL.
-        //
-        // DependencyInjection.cs already supports:
-        //
-        // Database:Provider = Sqlite
-        //
-        // so we do not need to remove/re-register EF services here.
         builder.UseSetting(
             "Database:Provider",
             "Sqlite");
@@ -67,17 +62,6 @@ public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            // ------------------------------------------------------------
-            // Test authentication.
-            //
-            // The production API protects the order endpoints with
-            // RequireAuthorization(). E2E tests should not require a
-            // real Microsoft Entra ID token.
-            //
-            // Instead, every test request receives a local authenticated
-            // principal.
-            // ------------------------------------------------------------
-
             services
                 .AddAuthentication(options =>
                 {
@@ -97,30 +81,28 @@ public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
                     _ =>
                     {
                     });
-
-            // ------------------------------------------------------------
-            // Create the SQLite database.
-            //
-            // AddInfrastructure() has already registered
-            // IDbContextFactory<OrdersDbContext> using SQLite because
-            // Database:Provider was set to Sqlite above.
-            // ------------------------------------------------------------
-
-            using var scope =
-                services
-                    .BuildServiceProvider()
-                    .CreateScope();
-
-            var factory =
-                scope.ServiceProvider
-                    .GetRequiredService<
-                        IDbContextFactory<OrdersDbContext>>();
-
-            using var db =
-                factory.CreateDbContext();
-
-            db.Database.EnsureCreated();
         });
+    }
+
+    public HttpClient CreateClientForTenant(
+        Guid tenantId)
+    {
+        var client = CreateClient();
+
+        client.DefaultRequestHeaders.Add(
+            TestTenantHeader,
+            tenantId.ToString());
+
+        return client;
+    }
+
+    public async Task InitializeDatabaseAsync()
+    {
+        await ExecuteDbAsync(
+            async db =>
+            {
+                await db.Database.EnsureCreatedAsync();
+            });
     }
 
     public async Task ExecuteDbAsync(
@@ -140,6 +122,8 @@ public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
 
             await using var db =
                 await factory.CreateDbContextAsync();
+
+            await db.Database.EnsureCreatedAsync();
 
             await operation(db);
         }
@@ -166,6 +150,8 @@ public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
 
             await using var db =
                 await factory.CreateDbContextAsync();
+
+            await db.Database.EnsureCreatedAsync();
 
             return await operation(db);
         }
@@ -200,16 +186,34 @@ public sealed class EuroTradeApiFactory : WebApplicationFactory<Program>
         protected override Task<AuthenticateResult>
             HandleAuthenticateAsync()
         {
+            var tenantId =
+                DefaultTenantId;
+
+            if (Request.Headers.TryGetValue(
+                    TestTenantHeader,
+                    out var tenantHeader) &&
+                Guid.TryParse(
+                    tenantHeader.ToString(),
+                    out var requestedTenantId))
+            {
+                tenantId =
+                    requestedTenantId;
+            }
+
             var claims =
                 new[]
                 {
                     new Claim(
                         ClaimTypes.NameIdentifier,
-                        "e2e-test-user"),
+                        $"e2e-user-{tenantId}"),
 
                     new Claim(
                         ClaimTypes.Name,
-                        "E2E Test User")
+                        "E2E Test User"),
+
+                    new Claim(
+                        "tenant_id",
+                        tenantId.ToString())
                 };
 
             var identity =

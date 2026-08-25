@@ -5,6 +5,8 @@ using EuroTrade.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Identity.Web;
 using OpenTelemetry.Trace;
+using EuroTrade.Api.Tenancy;
+using EuroTrade.Application.Tenancy;
 
 AppContext.SetSwitch(
     "Azure.Experimental.EnableActivitySource",
@@ -52,9 +54,11 @@ builder.Services.AddAuthorization();
 // Application / Infrastructure
 // ============================================================
 
-builder.Services.AddInfrastructure(
-    builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration);
 
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
 builder.Services.AddScoped<CreateOrderService>();
 builder.Services.AddScoped<GetOrderService>();
 
@@ -129,7 +133,6 @@ app.MapPost(
         CancellationToken cancellationToken) =>
     {
         var command = new CreateOrderCommand(
-            request.TenantId,
             request.CustomerId,
             request.ProductId,
             request.Quantity);
@@ -204,7 +207,6 @@ app.Run();
 public partial class Program;
 
 public sealed record CreateOrderRequest(
-    Guid TenantId,
     Guid CustomerId,
     Guid ProductId,
     int Quantity);

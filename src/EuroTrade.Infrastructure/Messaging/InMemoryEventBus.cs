@@ -45,9 +45,8 @@ public sealed class InMemoryEventBus : IEventBus, IEventConsumer
         CancellationToken cancellationToken)
     {
         await foreach (
-            var message
-                in _channel.Reader.ReadAllAsync(
-                    cancellationToken))
+            var message in _channel.Reader.ReadAllAsync(
+                cancellationToken))
         {
             yield return message;
         }

@@ -11,18 +11,25 @@ public sealed class EfOrderRepository(OrdersDbContext dbContext)
         Order order,
         CancellationToken cancellationToken = default)
     {
-        await dbContext.Orders.AddAsync(order, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await dbContext.Orders.AddAsync(
+            order,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(
+            cancellationToken);
     }
 
-    public async Task<Order?> GetByIdAsync(
+    public async Task<Order?> GetByTenantAndIdAsync(
+        Guid tenantId,
         Guid orderId,
         CancellationToken cancellationToken = default)
     {
         return await dbContext.Orders
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                order => order.Id == orderId,
+                order =>
+                    order.TenantId == tenantId &&
+                    order.Id == orderId,
                 cancellationToken);
     }
 }

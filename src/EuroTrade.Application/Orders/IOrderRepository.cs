@@ -8,7 +8,8 @@ public interface IOrderRepository
         Order order,
         CancellationToken cancellationToken = default);
 
-    Task<Order?> GetByIdAsync(
+    Task<Order?> GetByTenantAndIdAsync(
+        Guid tenantId,
         Guid orderId,
         CancellationToken cancellationToken = default);
 }
