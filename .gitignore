@@ -494,8 +494,14 @@ crash.*.log
 
 # Terraform plan files
 *.tfplan
+tfplan
 *.tfstate.lock.info
 
 .azure-tmp/
 
 efbundle
+
+# Generated Helm/Kubernetes output
+rendered.yaml
+*-rendered.yaml
+helm-rendered.yaml
