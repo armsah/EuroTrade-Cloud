@@ -202,6 +202,110 @@ public sealed class OrderAuthorizationTests
             otherTenantResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task Create_order_without_tenant_claim_returns_forbidden()
+    {
+        using var client =
+            _factory.CreateClientWithoutTenantClaim(
+                "Orders.Write");
+
+        var request =
+            new CreateOrderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                1);
+
+        var response =
+            await PostOrderAsync(
+                client,
+                request);
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_order_with_invalid_tenant_claim_returns_forbidden()
+    {
+        using var client =
+            _factory.CreateClientWithRawTenantClaim(
+                "not-a-guid",
+                "Orders.Write");
+
+        var request =
+            new CreateOrderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                1);
+
+        var response =
+            await PostOrderAsync(
+                client,
+                request);
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_order_with_empty_tenant_id_returns_forbidden()
+    {
+        using var client =
+            _factory.CreateClientWithRawTenantClaim(
+                Guid.Empty.ToString(),
+                "Orders.Write");
+
+        var request =
+            new CreateOrderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                1);
+
+        var response =
+            await PostOrderAsync(
+                client,
+                request);
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_order_without_tenant_claim_returns_forbidden()
+    {
+        using var client =
+            _factory.CreateClientWithoutTenantClaim(
+                "Orders.Read");
+
+        var response =
+            await client.GetAsync(
+                $"/api/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_order_with_invalid_tenant_claim_returns_forbidden()
+    {
+        using var client =
+            _factory.CreateClientWithRawTenantClaim(
+                "not-a-guid",
+                "Orders.Read");
+
+        var response =
+            await client.GetAsync(
+                $"/api/orders/{Guid.NewGuid()}");
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            response.StatusCode);
+    }
+
     private static async Task<HttpResponseMessage>
         PostOrderAsync(
             HttpClient client,

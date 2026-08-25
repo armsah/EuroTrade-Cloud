@@ -453,6 +453,75 @@ public sealed class OutboxRetryTests
             eventBus.PublishCount);
     }
 
+    [Fact]
+    public async Task Cancellation_during_publish_does_not_mark_message_as_published_or_failed()
+    {
+        await using var database =
+            await SqliteTestDatabase.CreateAsync();
+
+        using var cancellationTokenSource =
+            new CancellationTokenSource();
+
+        var eventBus =
+            new ConfigurableEventBus(
+                failuresBeforeSuccess: 0,
+                cancellationTokenSource:
+                    cancellationTokenSource);
+
+        using var services =
+            BuildServices(
+                database.Factory,
+                eventBus,
+                maxAttempts: 5,
+                baseRetryDelaySeconds: 2,
+                maxRetryDelaySeconds: 300);
+
+        var messageId =
+            await InsertPendingOrderCreatedAsync(
+                database.Factory);
+
+        var publisher =
+            services.GetRequiredService<
+                OutboxPublisher>();
+
+        await Assert.ThrowsAsync<
+            OperationCanceledException>(
+            () =>
+                publisher.PublishPendingMessagesAsync(
+                    cancellationTokenSource.Token));
+
+        Assert.Equal(
+            1,
+            eventBus.PublishCount);
+
+        await using var verificationDb =
+            await database.Factory
+                .CreateDbContextAsync();
+
+        var stored =
+            await verificationDb.OutboxMessages
+                .AsNoTracking()
+                .SingleAsync(
+                    message =>
+                        message.Id == messageId);
+
+        Assert.Null(
+            stored.PublishedAt);
+
+        Assert.Null(
+            stored.FailedAt);
+
+        Assert.Null(
+            stored.LastError);
+
+        Assert.Null(
+            stored.NextAttemptAt);
+
+        Assert.Equal(
+            0,
+            stored.AttemptCount);
+    }
+
     private static ServiceProvider BuildServices(
         IDbContextFactory<OrdersDbContext> factory,
         ConfigurableEventBus eventBus,
@@ -604,8 +673,9 @@ public sealed class OutboxRetryTests
     }
 
     private sealed class ConfigurableEventBus(
-        int failuresBeforeSuccess)
-        : IEventBus
+     int failuresBeforeSuccess,
+     CancellationTokenSource? cancellationTokenSource = null)
+     : IEventBus
     {
         private int _remainingFailures =
             failuresBeforeSuccess;
@@ -623,6 +693,14 @@ public sealed class OutboxRetryTests
         {
             Interlocked.Increment(
                 ref _publishCount);
+
+            if (cancellationTokenSource is not null)
+            {
+                cancellationTokenSource.Cancel();
+
+                cancellationToken
+                    .ThrowIfCancellationRequested();
+            }
 
             if (Interlocked.CompareExchange(
                     ref _remainingFailures,

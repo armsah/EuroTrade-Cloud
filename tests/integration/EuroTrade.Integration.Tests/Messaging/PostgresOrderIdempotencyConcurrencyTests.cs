@@ -8,23 +8,15 @@ using Microsoft.EntityFrameworkCore;
 namespace EuroTrade.Integration.Tests.Messaging;
 
 [Collection("Postgres integration")]
-public sealed class PostgresOrderIdempotencyConcurrencyTests
+public sealed class PostgresOrderIdempotencyConcurrencyTests(
+    PostgresTestFixture postgres)
 {
-    private const string ConnectionStringEnvironmentVariable =
-        "EUROTRADE_TEST_POSTGRES";
 
     [Fact]
     public async Task Concurrent_same_tenant_same_key_creates_one_order()
     {
         var connectionString =
-            Environment.GetEnvironmentVariable(
-                ConnectionStringEnvironmentVariable);
-
-        if (string.IsNullOrWhiteSpace(
-                connectionString))
-        {
-            return;
-        }
+            postgres.ConnectionString;
 
         var options =
             new DbContextOptionsBuilder<

@@ -17,7 +17,8 @@ namespace EuroTrade.E2E.Tests;
 public sealed class EuroTradeApiFactory
     : WebApplicationFactory<Program>
 {
-    private const string TestAuthenticationScheme = "Test";
+    private const string TestAuthenticationScheme =
+        "Test";
 
     public const string TestTenantHeader =
         "X-Test-Tenant-Id";
@@ -27,6 +28,12 @@ public sealed class EuroTradeApiFactory
 
     public const string TestUnauthenticatedHeader =
         "X-Test-Unauthenticated";
+
+    public const string TestTenantClaimHeader =
+        "X-Test-Tenant-Claim";
+
+    public const string TestOmitTenantClaimHeader =
+        "X-Test-Omit-Tenant-Claim";
 
     private const string TestDatabaseName =
         "EuroTradeE2E";
@@ -57,11 +64,13 @@ public sealed class EuroTradeApiFactory
     {
         var options =
             new DbContextOptionsBuilder<OrdersDbContext>()
-                .UseSqlite(_connection)
+                .UseSqlite(
+                    _connection)
                 .Options;
 
         using var db =
-            new OrdersDbContext(options);
+            new OrdersDbContext(
+                options);
 
         db.Database.EnsureCreated();
     }
@@ -69,7 +78,8 @@ public sealed class EuroTradeApiFactory
     protected override void ConfigureWebHost(
         IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(
+            "Testing");
 
         builder.UseSetting(
             "Database:Provider",
@@ -81,31 +91,33 @@ public sealed class EuroTradeApiFactory
             "Mode=Memory;" +
             "Cache=Shared;");
 
-        builder.ConfigureServices(services =>
-        {
-            services
-                .AddAuthentication(options =>
-                {
-                    options.DefaultAuthenticateScheme =
-                        TestAuthenticationScheme;
+        builder.ConfigureServices(
+            services =>
+            {
+                services
+                    .AddAuthentication(
+                        options =>
+                        {
+                            options.DefaultAuthenticateScheme =
+                                TestAuthenticationScheme;
 
-                    options.DefaultChallengeScheme =
-                        TestAuthenticationScheme;
+                            options.DefaultChallengeScheme =
+                                TestAuthenticationScheme;
 
-                    options.DefaultForbidScheme =
-                        TestAuthenticationScheme;
+                            options.DefaultForbidScheme =
+                                TestAuthenticationScheme;
 
-                    options.DefaultScheme =
-                        TestAuthenticationScheme;
-                })
-                .AddScheme<
-                    AuthenticationSchemeOptions,
-                    TestAuthenticationHandler>(
-                    TestAuthenticationScheme,
-                    _ =>
-                    {
-                    });
-        });
+                            options.DefaultScheme =
+                                TestAuthenticationScheme;
+                        })
+                    .AddScheme<
+                        AuthenticationSchemeOptions,
+                        TestAuthenticationHandler>(
+                        TestAuthenticationScheme,
+                        _ =>
+                        {
+                        });
+            });
     }
 
     public HttpClient CreateClientForTenant(
@@ -168,12 +180,52 @@ public sealed class EuroTradeApiFactory
         return client;
     }
 
+    public HttpClient CreateClientWithRawTenantClaim(
+        string tenantClaim,
+        params string[] scopes)
+    {
+        var client =
+            CreateClient();
+
+        client.DefaultRequestHeaders.Add(
+            TestTenantClaimHeader,
+            tenantClaim);
+
+        client.DefaultRequestHeaders.Add(
+            TestScopesHeader,
+            string.Join(
+                ' ',
+                scopes));
+
+        return client;
+    }
+
+    public HttpClient CreateClientWithoutTenantClaim(
+        params string[] scopes)
+    {
+        var client =
+            CreateClient();
+
+        client.DefaultRequestHeaders.Add(
+            TestOmitTenantClaimHeader,
+            "true");
+
+        client.DefaultRequestHeaders.Add(
+            TestScopesHeader,
+            string.Join(
+                ' ',
+                scopes));
+
+        return client;
+    }
+
     public async Task InitializeDatabaseAsync()
     {
         await ExecuteDbAsync(
             async db =>
             {
-                await db.Database.EnsureCreatedAsync();
+                await db.Database
+                    .EnsureCreatedAsync();
             });
     }
 
@@ -195,9 +247,11 @@ public sealed class EuroTradeApiFactory
             await using var db =
                 await factory.CreateDbContextAsync();
 
-            await db.Database.EnsureCreatedAsync();
+            await db.Database
+                .EnsureCreatedAsync();
 
-            await operation(db);
+            await operation(
+                db);
         }
         finally
         {
@@ -223,9 +277,11 @@ public sealed class EuroTradeApiFactory
             await using var db =
                 await factory.CreateDbContextAsync();
 
-            await db.Database.EnsureCreatedAsync();
+            await db.Database
+                .EnsureCreatedAsync();
 
-            return await operation(db);
+            return await operation(
+                db);
         }
         finally
         {
@@ -242,7 +298,8 @@ public sealed class EuroTradeApiFactory
             _connection.Dispose();
         }
 
-        base.Dispose(disposing);
+        base.Dispose(
+            disposing);
     }
 
     private sealed class TestAuthenticationHandler
@@ -308,12 +365,36 @@ public sealed class EuroTradeApiFactory
 
                     new(
                         ClaimTypes.Name,
-                        "E2E Test User"),
-
-                    new(
-                        "tenant_id",
-                        tenantId.ToString())
+                        "E2E Test User")
                 };
+
+            var omitTenantClaim =
+                Request.Headers.TryGetValue(
+                    TestOmitTenantClaimHeader,
+                    out var omitTenantHeader) &&
+                string.Equals(
+                    omitTenantHeader.ToString(),
+                    "true",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!omitTenantClaim)
+            {
+                var tenantClaim =
+                    tenantId.ToString();
+
+                if (Request.Headers.TryGetValue(
+                        TestTenantClaimHeader,
+                        out var tenantClaimHeader))
+                {
+                    tenantClaim =
+                        tenantClaimHeader.ToString();
+                }
+
+                claims.Add(
+                    new Claim(
+                        "tenant_id",
+                        tenantClaim));
+            }
 
             if (!string.IsNullOrWhiteSpace(
                     scopes))

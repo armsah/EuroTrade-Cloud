@@ -6,29 +6,22 @@ using Microsoft.EntityFrameworkCore;
 namespace EuroTrade.Integration.Tests.Messaging;
 
 [Collection("Postgres integration")]
-public sealed class PostgresInboxConcurrencyTests
+public sealed class PostgresInboxConcurrencyTests(
+    PostgresTestFixture postgres)
 {
-    private const string ConnectionStringEnvironmentVariable =
-        "EUROTRADE_TEST_POSTGRES";
-
     [Fact]
     public async Task Concurrent_workers_record_same_message_only_once()
     {
         var connectionString =
-            Environment.GetEnvironmentVariable(
-                ConnectionStringEnvironmentVariable);
-
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
+            postgres.ConnectionString;
 
         var options =
             new DbContextOptionsBuilder<OrdersDbContext>()
                 .UseNpgsql(connectionString)
                 .Options;
 
-        await ResetDatabaseAsync(options);
+        await ResetDatabaseAsync(
+            options);
 
         try
         {
@@ -39,10 +32,12 @@ public sealed class PostgresInboxConcurrencyTests
                 new InboxMessageStore();
 
             await using var contextA =
-                new OrdersDbContext(options);
+                new OrdersDbContext(
+                    options);
 
             await using var contextB =
-                new OrdersDbContext(options);
+                new OrdersDbContext(
+                    options);
 
             var workerA =
                 store.TryRecordAsync(
@@ -61,20 +56,26 @@ public sealed class PostgresInboxConcurrencyTests
 
             Assert.Equal(
                 1,
-                results.Count(result => result));
+                results.Count(
+                    result => result));
 
             Assert.Equal(
                 1,
-                results.Count(result => !result));
+                results.Count(
+                    result => !result));
 
             await using var verificationContext =
-                new OrdersDbContext(options);
+                new OrdersDbContext(
+                    options);
 
             var inboxRows =
-                await verificationContext.InboxMessages
+                await verificationContext
+                    .InboxMessages
                     .AsNoTracking()
-                    .Where(message =>
-                        message.MessageId == messageId)
+                    .Where(
+                        message =>
+                            message.MessageId ==
+                            messageId)
                     .ToListAsync();
 
             Assert.Single(
@@ -82,7 +83,8 @@ public sealed class PostgresInboxConcurrencyTests
         }
         finally
         {
-            await ResetDatabaseAsync(options);
+            await ResetDatabaseAsync(
+                options);
         }
     }
 
@@ -90,20 +92,15 @@ public sealed class PostgresInboxConcurrencyTests
     public async Task Repeated_concurrent_attempts_do_not_throw_unique_key_exception()
     {
         var connectionString =
-            Environment.GetEnvironmentVariable(
-                ConnectionStringEnvironmentVariable);
-
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
+            postgres.ConnectionString;
 
         var options =
             new DbContextOptionsBuilder<OrdersDbContext>()
                 .UseNpgsql(connectionString)
                 .Options;
 
-        await ResetDatabaseAsync(options);
+        await ResetDatabaseAsync(
+            options);
 
         try
         {
@@ -136,21 +133,26 @@ public sealed class PostgresInboxConcurrencyTests
 
             Assert.Equal(
                 1,
-                results.Count(result => result));
+                results.Count(
+                    result => result));
 
             Assert.Equal(
                 9,
-                results.Count(result => !result));
+                results.Count(
+                    result => !result));
 
             await using var verificationContext =
-                new OrdersDbContext(options);
+                new OrdersDbContext(
+                    options);
 
             var count =
-                await verificationContext.InboxMessages
+                await verificationContext
+                    .InboxMessages
                     .AsNoTracking()
                     .CountAsync(
                         message =>
-                            message.MessageId == messageId);
+                            message.MessageId ==
+                            messageId);
 
             Assert.Equal(
                 1,
@@ -158,22 +160,25 @@ public sealed class PostgresInboxConcurrencyTests
         }
         finally
         {
-            await ResetDatabaseAsync(options);
+            await ResetDatabaseAsync(
+                options);
         }
     }
 
     private static async Task ResetDatabaseAsync(
-    DbContextOptions<OrdersDbContext> options)
+        DbContextOptions<OrdersDbContext> options)
     {
         await using var dbContext =
-            new OrdersDbContext(options);
+            new OrdersDbContext(
+                options);
 
         await dbContext.Database.ExecuteSqlRawAsync(
             """
-        DROP SCHEMA IF EXISTS public CASCADE;
-        CREATE SCHEMA public;
-        """);
+            DROP SCHEMA IF EXISTS public CASCADE;
+            CREATE SCHEMA public;
+            """);
 
-        await dbContext.Database.EnsureCreatedAsync();
+        await dbContext.Database
+            .EnsureCreatedAsync();
     }
 }

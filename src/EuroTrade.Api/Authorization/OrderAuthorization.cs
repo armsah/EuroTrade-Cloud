@@ -25,7 +25,9 @@ public static class OrderAuthorization
                     context =>
                         HasScope(
                             context.User,
-                            ReadScope));
+                            ReadScope) &&
+                        HasValidTenant(
+                            context.User));
             });
 
         options.AddPolicy(
@@ -38,7 +40,9 @@ public static class OrderAuthorization
                     context =>
                         HasScope(
                             context.User,
-                            WriteScope));
+                            WriteScope) &&
+                        HasValidTenant(
+                            context.User));
             });
     }
 
@@ -57,5 +61,20 @@ public static class OrderAuthorization
             .Contains(
                 requiredScope,
                 StringComparer.Ordinal);
+    }
+
+    private static bool HasValidTenant(
+        ClaimsPrincipal user)
+    {
+        var tenantIdValue =
+            user.FindFirst("tenant_id")?.Value;
+
+        return
+            !string.IsNullOrWhiteSpace(
+                tenantIdValue) &&
+            Guid.TryParse(
+                tenantIdValue,
+                out var tenantId) &&
+            tenantId != Guid.Empty;
     }
 }
