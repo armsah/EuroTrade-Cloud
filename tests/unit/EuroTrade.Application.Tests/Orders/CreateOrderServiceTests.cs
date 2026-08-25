@@ -10,18 +10,28 @@ public sealed class CreateOrderServiceTests
     [Fact]
     public async Task ExecuteAsync_WithValidCommand_UsesAuthorizedTenant()
     {
-        var tenantId = Guid.NewGuid();
-        var customerId = Guid.NewGuid();
-        var productId = Guid.NewGuid();
+        var tenantId =
+            Guid.NewGuid();
 
-        var command = new CreateOrderCommand(
-            customerId,
-            productId,
-            3);
+        var customerId =
+            Guid.NewGuid();
 
-        var writer = new FakeOrderWriter();
+        var productId =
+            Guid.NewGuid();
+
+        var command =
+            new CreateOrderCommand(
+                customerId,
+                productId,
+                3,
+                "unit-test-key");
+
+        var writer =
+            new FakeOrderWriter();
+
         var tenantContext =
-            new FakeTenantContext(tenantId);
+            new FakeTenantContext(
+                tenantId);
 
         var service =
             new CreateOrderService(
@@ -29,7 +39,8 @@ public sealed class CreateOrderServiceTests
                 tenantContext);
 
         var result =
-            await service.ExecuteAsync(command);
+            await service.ExecuteAsync(
+                command);
 
         Assert.NotEqual(
             Guid.Empty,
@@ -55,7 +66,8 @@ public sealed class CreateOrderServiceTests
             "Pending",
             result.Status);
 
-        Assert.NotNull(writer.Order);
+        Assert.NotNull(
+            writer.Order);
 
         Assert.Equal(
             tenantId,
@@ -65,7 +77,8 @@ public sealed class CreateOrderServiceTests
             result.OrderId,
             writer.Order.Id);
 
-        Assert.NotNull(writer.OrderCreated);
+        Assert.NotNull(
+            writer.OrderCreated);
 
         Assert.Equal(
             result.OrderId,
@@ -86,10 +99,38 @@ public sealed class CreateOrderServiceTests
         Assert.Equal(
             3,
             writer.OrderCreated.Quantity);
+
+        Assert.Equal(
+            "unit-test-key",
+            writer.IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutIdempotencyKey_Throws()
+    {
+        var service =
+            new CreateOrderService(
+                new FakeOrderWriter(),
+                new FakeTenantContext(
+                    Guid.NewGuid()));
+
+        var command =
+            new CreateOrderCommand(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                1,
+                string.Empty);
+
+        await Assert.ThrowsAsync<
+            ArgumentException>(
+            () =>
+                service.ExecuteAsync(
+                    command));
     }
 
     private sealed class FakeTenantContext(
-        Guid tenantId) : ITenantContext
+        Guid tenantId)
+        : ITenantContext
     {
         public Guid TenantId { get; } =
             tenantId;
@@ -98,7 +139,11 @@ public sealed class CreateOrderServiceTests
     private sealed class FakeOrderWriter
         : IOrderWriter
     {
-        public Order? Order { get; private set; }
+        public Order? Order
+        {
+            get;
+            private set;
+        }
 
         public OrderCreated? OrderCreated
         {
@@ -106,15 +151,32 @@ public sealed class CreateOrderServiceTests
             private set;
         }
 
-        public Task AddAsync(
+        public string? IdempotencyKey
+        {
+            get;
+            private set;
+        }
+
+        public Task<OrderWriteResult> AddAsync(
             Order order,
             OrderCreated orderCreated,
-            CancellationToken cancellationToken = default)
+            string idempotencyKey,
+            CancellationToken cancellationToken =
+                default)
         {
-            Order = order;
-            OrderCreated = orderCreated;
+            Order =
+                order;
 
-            return Task.CompletedTask;
+            OrderCreated =
+                orderCreated;
+
+            IdempotencyKey =
+                idempotencyKey;
+
+            return Task.FromResult(
+                new OrderWriteResult(
+                    order,
+                    true));
         }
     }
 }

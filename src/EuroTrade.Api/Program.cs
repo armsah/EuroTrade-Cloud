@@ -1,18 +1,22 @@
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.Exporter;
+
+using EuroTrade.Api.Tenancy;
 using EuroTrade.Application.Orders;
+using EuroTrade.Application.Tenancy;
 using EuroTrade.Infrastructure;
+
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Identity.Web;
+
 using OpenTelemetry.Trace;
-using EuroTrade.Api.Tenancy;
-using EuroTrade.Application.Tenancy;
 
 AppContext.SetSwitch(
     "Azure.Experimental.EnableActivitySource",
     true);
 
-var builder = WebApplication.CreateBuilder(args);
+var builder =
+    WebApplication.CreateBuilder(args);
 
 // ============================================================
 // Azure Key Vault
@@ -21,10 +25,12 @@ var builder = WebApplication.CreateBuilder(args);
 var keyVaultName =
     builder.Configuration["KeyVault:Name"];
 
-if (!string.IsNullOrWhiteSpace(keyVaultName))
+if (!string.IsNullOrWhiteSpace(
+        keyVaultName))
 {
     var keyVaultUri =
-        new Uri($"https://{keyVaultName}.vault.azure.net/");
+        new Uri(
+            $"https://{keyVaultName}.vault.azure.net/");
 
     builder.Configuration.AddAzureKeyVault(
         keyVaultUri,
@@ -38,14 +44,17 @@ if (!string.IsNullOrWhiteSpace(keyVaultName))
 var azureAdClientId =
     builder.Configuration["AzureAd:ClientId"];
 
-if (!string.IsNullOrWhiteSpace(azureAdClientId))
+if (!string.IsNullOrWhiteSpace(
+        azureAdClientId))
 {
     builder.Services
         .AddAuthentication(
             JwtBearerDefaults.AuthenticationScheme)
         .AddMicrosoftIdentityWebApi(
-            builder.Configuration.GetSection("AzureAd"),
-            subscribeToJwtBearerMiddlewareDiagnosticsEvents: true);
+            builder.Configuration
+                .GetSection("AzureAd"),
+            subscribeToJwtBearerMiddlewareDiagnosticsEvents:
+                true);
 }
 
 builder.Services.AddAuthorization();
@@ -54,13 +63,20 @@ builder.Services.AddAuthorization();
 // Application / Infrastructure
 // ============================================================
 
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(
+    builder.Configuration);
 
 builder.Services.AddHttpContextAccessor();
 
-builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
-builder.Services.AddScoped<CreateOrderService>();
-builder.Services.AddScoped<GetOrderService>();
+builder.Services.AddScoped<
+    ITenantContext,
+    HttpTenantContext>();
+
+builder.Services.AddScoped<
+    CreateOrderService>();
+
+builder.Services.AddScoped<
+    GetOrderService>();
 
 // ============================================================
 // Application Insights / Azure Monitor
@@ -99,7 +115,8 @@ if (!string.IsNullOrWhiteSpace(
 // Build application
 // ============================================================
 
-var app = builder.Build();
+var app =
+    builder.Build();
 
 // ============================================================
 // Authentication / Authorization middleware
@@ -129,13 +146,31 @@ app.MapPost(
     "/api/orders",
     async (
         CreateOrderRequest request,
+        HttpRequest httpRequest,
         CreateOrderService service,
         CancellationToken cancellationToken) =>
     {
-        var command = new CreateOrderCommand(
-            request.CustomerId,
-            request.ProductId,
-            request.Quantity);
+        if (!httpRequest.Headers.TryGetValue(
+                "Idempotency-Key",
+                out var idempotencyKeyValues) ||
+            idempotencyKeyValues.Count != 1 ||
+            string.IsNullOrWhiteSpace(
+                idempotencyKeyValues[0]))
+        {
+            return Results.BadRequest(
+                new
+                {
+                    error =
+                        "Idempotency-Key header is required."
+                });
+        }
+
+        var command =
+            new CreateOrderCommand(
+                request.CustomerId,
+                request.ProductId,
+                request.Quantity,
+                idempotencyKeyValues[0]!);
 
         try
         {
@@ -148,12 +183,23 @@ app.MapPost(
                 $"/api/orders/{result.OrderId}",
                 result);
         }
+        catch (
+            IdempotencyConflictException exception)
+        {
+            return Results.Conflict(
+                new
+                {
+                    error =
+                        exception.Message
+                });
+        }
         catch (ArgumentException exception)
         {
             return Results.BadRequest(
                 new
                 {
-                    error = exception.Message
+                    error =
+                        exception.Message
                 });
         }
     })
@@ -180,20 +226,34 @@ app.MapGet(
             return Results.NotFound(
                 new
                 {
-                    error = "Order not found."
+                    error =
+                        "Order not found."
                 });
         }
 
         return Results.Ok(
             new
             {
-                orderId = order.Id,
-                tenantId = order.TenantId,
-                customerId = order.CustomerId,
-                productId = order.ProductId,
-                quantity = order.Quantity,
-                status = order.Status.ToString(),
-                createdAt = order.CreatedAt
+                orderId =
+                    order.Id,
+
+                tenantId =
+                    order.TenantId,
+
+                customerId =
+                    order.CustomerId,
+
+                productId =
+                    order.ProductId,
+
+                quantity =
+                    order.Quantity,
+
+                status =
+                    order.Status.ToString(),
+
+                createdAt =
+                    order.CreatedAt
             });
     })
     .RequireAuthorization();

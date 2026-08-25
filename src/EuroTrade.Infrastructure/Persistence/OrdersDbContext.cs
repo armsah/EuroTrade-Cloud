@@ -1,6 +1,8 @@
 using EuroTrade.Domain.Orders;
+using EuroTrade.Infrastructure.Persistence.Idempotency;
 using EuroTrade.Infrastructure.Persistence.Inbox;
 using EuroTrade.Infrastructure.Persistence.Outbox;
+
 using Microsoft.EntityFrameworkCore;
 
 namespace EuroTrade.Infrastructure.Persistence;
@@ -17,6 +19,9 @@ public sealed class OrdersDbContext(
 
     public DbSet<InboxMessage> InboxMessages =>
         Set<InboxMessage>();
+
+    public DbSet<IdempotencyRecord> IdempotencyRecords =>
+        Set<IdempotencyRecord>();
 
     protected override void OnModelCreating(
         ModelBuilder modelBuilder)
@@ -86,6 +91,45 @@ public sealed class OrdersDbContext(
 
             entity.Property(message => message.ReceivedAt)
                 .IsRequired();
+        });
+
+        modelBuilder.Entity<IdempotencyRecord>(entity =>
+        {
+            entity.ToTable("idempotency_records");
+
+            entity.HasKey(record => record.Id);
+
+            entity.Property(record => record.Id)
+                .ValueGeneratedNever();
+
+            entity.Property(record => record.TenantId)
+                .IsRequired();
+
+            entity.Property(record => record.IdempotencyKey)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            entity.Property(record => record.OrderId)
+                .IsRequired();
+
+            entity.Property(record => record.CustomerId)
+                .IsRequired();
+
+            entity.Property(record => record.ProductId)
+                .IsRequired();
+
+            entity.Property(record => record.Quantity)
+                .IsRequired();
+
+            entity.Property(record => record.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(record => new
+            {
+                record.TenantId,
+                record.IdempotencyKey
+            })
+            .IsUnique();
         });
     }
 }

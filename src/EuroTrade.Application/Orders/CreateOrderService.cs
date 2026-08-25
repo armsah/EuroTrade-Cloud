@@ -12,34 +12,60 @@ public sealed class CreateOrderService(
         CreateOrderCommand command,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = tenantContext.TenantId;
+        if (string.IsNullOrWhiteSpace(
+                command.IdempotencyKey))
+        {
+            throw new ArgumentException(
+                "Idempotency-Key is required.",
+                nameof(command.IdempotencyKey));
+        }
 
-        var order = Order.Create(
-            tenantId,
-            command.CustomerId,
-            command.ProductId,
-            command.Quantity);
+        var idempotencyKey =
+            command.IdempotencyKey.Trim();
 
-        var orderCreated = new OrderCreated(
-            order.Id,
-            order.TenantId,
-            order.CustomerId,
-            order.ProductId,
-            order.Quantity,
-            order.CreatedAt);
+        if (idempotencyKey.Length > 200)
+        {
+            throw new ArgumentException(
+                "Idempotency-Key must not exceed 200 characters.",
+                nameof(command.IdempotencyKey));
+        }
 
-        await orderWriter.AddAsync(
-            order,
-            orderCreated,
-            cancellationToken);
+        var tenantId =
+            tenantContext.TenantId;
+
+        var order =
+            Order.Create(
+                tenantId,
+                command.CustomerId,
+                command.ProductId,
+                command.Quantity);
+
+        var orderCreated =
+            new OrderCreated(
+                order.Id,
+                order.TenantId,
+                order.CustomerId,
+                order.ProductId,
+                order.Quantity,
+                order.CreatedAt);
+
+        var writeResult =
+            await orderWriter.AddAsync(
+                order,
+                orderCreated,
+                idempotencyKey,
+                cancellationToken);
+
+        var persistedOrder =
+            writeResult.Order;
 
         return new CreateOrderResult(
-            order.Id,
-            order.TenantId,
-            order.CustomerId,
-            order.ProductId,
-            order.Quantity,
-            order.Status.ToString(),
-            order.CreatedAt);
+            persistedOrder.Id,
+            persistedOrder.TenantId,
+            persistedOrder.CustomerId,
+            persistedOrder.ProductId,
+            persistedOrder.Quantity,
+            persistedOrder.Status.ToString(),
+            persistedOrder.CreatedAt);
     }
 }

@@ -15,8 +15,11 @@ public sealed class OrderEndpointsTests
     public OrderEndpointsTests(
         EuroTradeApiFactory factory)
     {
-        _factory = factory;
-        _client = factory.CreateClient();
+        _factory =
+            factory;
+
+        _client =
+            factory.CreateClient();
     }
 
     public async Task InitializeAsync()
@@ -39,8 +42,8 @@ public sealed class OrderEndpointsTests
                 5);
 
         var createResponse =
-            await _client.PostAsJsonAsync(
-                "/api/orders",
+            await PostOrderAsync(
+                _client,
                 request);
 
         Assert.Equal(
@@ -49,9 +52,11 @@ public sealed class OrderEndpointsTests
 
         var created =
             await createResponse.Content
-                .ReadFromJsonAsync<CreateOrderResponse>();
+                .ReadFromJsonAsync<
+                    CreateOrderResponse>();
 
-        Assert.NotNull(created);
+        Assert.NotNull(
+            created);
 
         Assert.NotEqual(
             Guid.Empty,
@@ -67,9 +72,11 @@ public sealed class OrderEndpointsTests
 
         var order =
             await getResponse.Content
-                .ReadFromJsonAsync<GetOrderResponse>();
+                .ReadFromJsonAsync<
+                    GetOrderResponse>();
 
-        Assert.NotNull(order);
+        Assert.NotNull(
+            order);
 
         Assert.Equal(
             created.OrderId,
@@ -121,10 +128,9 @@ public sealed class OrderEndpointsTests
                 Guid.NewGuid(),
                 5);
 
-        // Tenant A creates the order.
         var createResponse =
-            await tenantAClient.PostAsJsonAsync(
-                "/api/orders",
+            await PostOrderAsync(
+                tenantAClient,
                 request);
 
         Assert.Equal(
@@ -133,15 +139,16 @@ public sealed class OrderEndpointsTests
 
         var created =
             await createResponse.Content
-                .ReadFromJsonAsync<CreateOrderResponse>();
+                .ReadFromJsonAsync<
+                    CreateOrderResponse>();
 
-        Assert.NotNull(created);
+        Assert.NotNull(
+            created);
 
         Assert.NotEqual(
             Guid.Empty,
             created.OrderId);
 
-        // Tenant A can retrieve its own order.
         var tenantAResponse =
             await tenantAClient.GetAsync(
                 $"/api/orders/{created.OrderId}");
@@ -152,9 +159,11 @@ public sealed class OrderEndpointsTests
 
         var tenantAOrder =
             await tenantAResponse.Content
-                .ReadFromJsonAsync<GetOrderResponse>();
+                .ReadFromJsonAsync<
+                    GetOrderResponse>();
 
-        Assert.NotNull(tenantAOrder);
+        Assert.NotNull(
+            tenantAOrder);
 
         Assert.Equal(
             tenantA,
@@ -164,13 +173,10 @@ public sealed class OrderEndpointsTests
             created.OrderId,
             tenantAOrder.OrderId);
 
-        // Tenant B attempts to retrieve Tenant A's order.
         var tenantBResponse =
             await tenantBClient.GetAsync(
                 $"/api/orders/{created.OrderId}");
 
-        // Deliberately return 404 rather than revealing that
-        // another tenant owns the requested resource.
         Assert.Equal(
             HttpStatusCode.NotFound,
             tenantBResponse.StatusCode);
@@ -186,8 +192,8 @@ public sealed class OrderEndpointsTests
                 3);
 
         var createResponse =
-            await _client.PostAsJsonAsync(
-                "/api/orders",
+            await PostOrderAsync(
+                _client,
                 request);
 
         Assert.Equal(
@@ -196,9 +202,11 @@ public sealed class OrderEndpointsTests
 
         var created =
             await createResponse.Content
-                .ReadFromJsonAsync<CreateOrderResponse>();
+                .ReadFromJsonAsync<
+                    CreateOrderResponse>();
 
-        Assert.NotNull(created);
+        Assert.NotNull(
+            created);
 
         Assert.NotEqual(
             Guid.Empty,
@@ -223,7 +231,8 @@ public sealed class OrderEndpointsTests
                 message =>
                     message is not null);
 
-        Assert.NotNull(outboxMessage);
+        Assert.NotNull(
+            outboxMessage);
 
         Assert.Equal(
             nameof(
@@ -267,7 +276,8 @@ public sealed class OrderEndpointsTests
                                 .SingleOrDefaultAsync(
                                     message =>
                                         message.MessageId ==
-                                        outboxMessage.Id.ToString())),
+                                        outboxMessage.Id
+                                            .ToString())),
                 message =>
                     message is not null &&
                     message.ProcessedAt is not null);
@@ -284,6 +294,253 @@ public sealed class OrderEndpointsTests
     }
 
     [Fact]
+    public async Task Retrying_create_order_with_same_key_returns_same_order()
+    {
+        var request =
+            new CreateOrderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                5);
+
+        const string idempotencyKey =
+            "retry-create-order";
+
+        var firstResponse =
+            await PostOrderAsync(
+                _client,
+                request,
+                idempotencyKey);
+
+        var secondResponse =
+            await PostOrderAsync(
+                _client,
+                request,
+                idempotencyKey);
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            firstResponse.StatusCode);
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            secondResponse.StatusCode);
+
+        var first =
+            await firstResponse.Content
+                .ReadFromJsonAsync<
+                    CreateOrderResponse>();
+
+        var second =
+            await secondResponse.Content
+                .ReadFromJsonAsync<
+                    CreateOrderResponse>();
+
+        Assert.NotNull(
+            first);
+
+        Assert.NotNull(
+            second);
+
+        Assert.Equal(
+            first.OrderId,
+            second.OrderId);
+
+        var orderCount =
+            await _factory.ExecuteDbAsync(
+                db =>
+                    db.Orders.CountAsync(
+                        order =>
+                            order.Id ==
+                            first.OrderId));
+
+        Assert.Equal(
+            1,
+            orderCount);
+
+        var idempotencyCount =
+            await _factory.ExecuteDbAsync(
+                db =>
+                    db.IdempotencyRecords
+                        .CountAsync(
+                            record =>
+                                record.TenantId ==
+                                EuroTradeApiFactory
+                                    .DefaultTenantId &&
+                                record.IdempotencyKey ==
+                                idempotencyKey));
+
+        Assert.Equal(
+            1,
+            idempotencyCount);
+
+        var outboxCount =
+            await _factory.ExecuteDbAsync(
+                db =>
+                    db.OutboxMessages
+                        .CountAsync(
+                            message =>
+                                message.Payload.Contains(
+                                    first.OrderId
+                                        .ToString())));
+
+        Assert.Equal(
+            1,
+            outboxCount);
+    }
+
+    [Fact]
+    public async Task Reusing_same_key_for_different_request_returns_conflict()
+    {
+        const string idempotencyKey =
+            "conflicting-order-key";
+
+        var firstRequest =
+            new CreateOrderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                2);
+
+        var secondRequest =
+            new CreateOrderRequest(
+                firstRequest.CustomerId,
+                firstRequest.ProductId,
+                99);
+
+        var firstResponse =
+            await PostOrderAsync(
+                _client,
+                firstRequest,
+                idempotencyKey);
+
+        var secondResponse =
+            await PostOrderAsync(
+                _client,
+                secondRequest,
+                idempotencyKey);
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            firstResponse.StatusCode);
+
+        Assert.Equal(
+            HttpStatusCode.Conflict,
+            secondResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Same_idempotency_key_can_be_used_by_different_tenants()
+    {
+        var tenantA =
+            Guid.Parse(
+                "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+        var tenantB =
+            Guid.Parse(
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+        using var tenantAClient =
+            _factory.CreateClientForTenant(
+                tenantA);
+
+        using var tenantBClient =
+            _factory.CreateClientForTenant(
+                tenantB);
+
+        const string idempotencyKey =
+            "shared-tenant-key";
+
+        var request =
+            new CreateOrderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                4);
+
+        var tenantAResponse =
+            await PostOrderAsync(
+                tenantAClient,
+                request,
+                idempotencyKey);
+
+        var tenantBResponse =
+            await PostOrderAsync(
+                tenantBClient,
+                request,
+                idempotencyKey);
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            tenantAResponse.StatusCode);
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            tenantBResponse.StatusCode);
+
+        var tenantAOrder =
+            await tenantAResponse.Content
+                .ReadFromJsonAsync<
+                    CreateOrderResponse>();
+
+        var tenantBOrder =
+            await tenantBResponse.Content
+                .ReadFromJsonAsync<
+                    CreateOrderResponse>();
+
+        Assert.NotNull(
+            tenantAOrder);
+
+        Assert.NotNull(
+            tenantBOrder);
+
+        Assert.NotEqual(
+            tenantAOrder.OrderId,
+            tenantBOrder.OrderId);
+
+        var idempotencyRecords =
+            await _factory.ExecuteDbAsync(
+                db =>
+                    db.IdempotencyRecords
+                        .Where(record =>
+                            record.IdempotencyKey ==
+                            idempotencyKey)
+                        .ToListAsync());
+
+        Assert.Equal(
+            2,
+            idempotencyRecords.Count);
+
+        Assert.Contains(
+            idempotencyRecords,
+            record =>
+                record.TenantId ==
+                tenantA);
+
+        Assert.Contains(
+            idempotencyRecords,
+            record =>
+                record.TenantId ==
+                tenantB);
+    }
+
+    [Fact]
+    public async Task Create_order_without_idempotency_key_returns_bad_request()
+    {
+        var request =
+            new CreateOrderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                1);
+
+        var response =
+            await _client.PostAsJsonAsync(
+                "/api/orders",
+                request);
+
+        Assert.Equal(
+            HttpStatusCode.BadRequest,
+            response.StatusCode);
+    }
+
+    [Fact]
     public async Task Get_unknown_order_returns_not_found()
     {
         var response =
@@ -293,6 +550,31 @@ public sealed class OrderEndpointsTests
         Assert.Equal(
             HttpStatusCode.NotFound,
             response.StatusCode);
+    }
+
+    private static async Task<HttpResponseMessage>
+        PostOrderAsync(
+            HttpClient client,
+            CreateOrderRequest request,
+            string? idempotencyKey = null)
+    {
+        using var message =
+            new HttpRequestMessage(
+                HttpMethod.Post,
+                "/api/orders")
+            {
+                Content =
+                    JsonContent.Create(
+                        request)
+            };
+
+        message.Headers.Add(
+            "Idempotency-Key",
+            idempotencyKey ??
+            Guid.NewGuid().ToString());
+
+        return await client.SendAsync(
+            message);
     }
 
     private static async Task<T> WaitForAsync<T>(
@@ -324,7 +606,8 @@ public sealed class OrderEndpointsTests
 
         Assert.True(
             condition(finalResult),
-            "Timed out waiting for the expected background-processing state.");
+            "Timed out waiting for the expected " +
+            "background-processing state.");
 
         return finalResult;
     }
