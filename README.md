@@ -66,30 +66,30 @@ next milestones**, not completed functionality.
 
 ### Capability status
 
-  Capability                                      Status
-  ----------------------------------------------- --------------------------
-  Order domain and API                            **Implemented**
-  PostgreSQL persistence                          **Implemented**
-  Transactional Outbox                            **Implemented**
-  Durable Inbox / duplicate protection            **Implemented**
-  Idempotent order creation                       **Implemented**
-  Azure Service Bus                               **Implemented**
-  Retry / poison-message / dead-letter handling   **Implemented**
-  Entra ID authentication                         **Implemented**
-  Tenant-aware authorization                      **Implemented**
-  Workload Identity / Azure RBAC                  **Implemented**
-  OpenTelemetry tracing                           **Implemented**
-  Business / reliability metrics                  **Implemented**
-  Terraform infrastructure                        **Implemented**
-  Helm / Kubernetes deployment                    **Implemented**
-  Container / Kubernetes hardening                **Implemented**
-  Inventory                                       **Planned**
-  Payment                                         **Planned**
-  Fulfillment                                     **Planned**
-  Saga orchestration / compensation               **Planned**
-  Multi-node / multi-zone AKS                     **Production extension**
-  HPA / cluster autoscaling                       **Production extension**
-  PostgreSQL HA                                   **Production extension**
+| Capability | Status |
+| --- | --- |
+| Order domain and API | **Implemented** |
+| PostgreSQL persistence | **Implemented** |
+| Transactional Outbox | **Implemented** |
+| Durable Inbox / duplicate protection | **Implemented** |
+| Idempotent order creation | **Implemented** |
+| Azure Service Bus | **Implemented** |
+| Retry / poison-message / dead-letter handling | **Implemented** |
+| Entra ID authentication | **Implemented** |
+| Tenant-aware authorization | **Implemented** |
+| Workload Identity / Azure RBAC | **Implemented** |
+| OpenTelemetry tracing | **Implemented** |
+| Business / reliability metrics | **Implemented** |
+| Terraform infrastructure | **Implemented** |
+| Helm / Kubernetes deployment | **Implemented** |
+| Container / Kubernetes hardening | **Implemented** |
+| Inventory | **Planned** |
+| Payment | **Planned** |
+| Fulfillment | **Planned** |
+| Saga orchestration / compensation | **Planned** |
+| Multi-node / multi-zone AKS | **Production extension** |
+| HPA / cluster autoscaling | **Production extension** |
+| PostgreSQL HA | **Production extension** |
 
 ------------------------------------------------------------------------
 
