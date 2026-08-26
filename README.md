@@ -1,408 +1,360 @@
 # EuroTrade Cloud
 
-**Production-oriented multi-tenant B2B order platform built with .NET and Azure.**
+**Production-oriented multi-tenant B2B order-processing platform built
+with .NET and Azure.**
 
-EuroTrade Cloud is a portfolio cloud-engineering project demonstrating secure, reliable and observable order processing using **.NET, PostgreSQL, Azure Service Bus, AKS, Terraform, Helm and OpenTelemetry**.
+EuroTrade Cloud is a cloud-native order-processing platform created to
+demonstrate how I would design a **reliable enterprise application**,
+rather than simply a CRUD API.
 
-The software and infrastructure-as-code demonstrate production-oriented engineering patterns. The actual Azure demo environment is deliberately **cost-optimized** and is not represented as a fully highly available production environment.
+It uses **Clean Architecture, PostgreSQL, Azure Service Bus, AKS,
+Terraform and Helm**. A central design decision is the **Transactional
+Outbox pattern**, which provides reliable coordination between database
+transactions and asynchronous messaging.
 
----
+The project also incorporates **Microsoft Entra ID, Workload Identity,
+tenant-aware authorization and OpenTelemetry** for security and
+observability.
+
+The software and infrastructure-as-code demonstrate production-oriented
+engineering patterns. The actual Azure demo environment is deliberately
+**cost-optimized** and is not represented as a fully highly available
+production environment.
+
+------------------------------------------------------------------------
 
 ## 1. What problem is solved?
 
-EuroTrade Cloud demonstrates the technical foundation of a multi-tenant B2B order-processing platform where business operations must remain secure and reliable across database and asynchronous messaging boundaries.
+Enterprise order processing involves more than storing an order in a
+database.
 
-The implemented platform addresses:
+The system must handle questions such as:
 
-- Tenant isolation and tenant-aware authorization
-- Order creation and lifecycle management
-- PostgreSQL persistence
-- Transactional consistency using the **Outbox pattern**
-- Duplicate protection using the **Inbox/idempotency pattern**
-- Asynchronous processing with Azure Service Bus
-- Retry, poison-message and dead-letter handling
-- Secure Azure access using Entra ID, RBAC and Workload Identity
-- Private connectivity for sensitive Azure services
-- Distributed tracing across asynchronous boundaries
-- Business and messaging reliability metrics
-- Container and Kubernetes runtime security
-- Reproducible infrastructure and deployment using Terraform and Helm
+-   What happens if PostgreSQL commits an order but message publication
+    fails?
+-   What happens if the same message is delivered twice?
+-   What happens if the application crashes between messaging
+    operations?
+-   How is one tenant prevented from accessing another tenant's
+    resources?
+-   How can an HTTP request be correlated with asynchronous processing
+    later?
+-   How can the application access Azure services without long-lived
+    credentials?
 
-The broader architecture is intended to evolve toward **inventory, payment, fulfillment and Saga-based workflows**. Those capabilities are planned and are not presented as completed functionality.
+EuroTrade Cloud focuses on these reliability, consistency, security and
+operational concerns.
+
+The implemented foundation includes:
+
+-   Order creation and lifecycle management
+-   PostgreSQL persistence
+-   Transactional Outbox
+-   Durable Inbox / idempotency
+-   Azure Service Bus messaging
+-   Retry, poison-message and dead-letter handling
+-   Tenant-aware authorization
+-   Entra ID authentication and Azure RBAC
+-   Workload Identity
+-   OpenTelemetry tracing and application metrics
+-   Terraform infrastructure
+-   Helm / Kubernetes deployment
+-   Container and Kubernetes runtime hardening
+
+Inventory, payment, fulfillment and Saga orchestration are **planned
+next milestones**, not completed functionality.
 
 ### Capability status
 
-| Capability | Status |
-| --- | --- |
-| Order domain and API | **Implemented** |
-| PostgreSQL persistence | **Implemented** |
-| Tenant isolation | **Implemented** |
-| Entra ID authentication | **Implemented** |
-| Tenant-aware authorization | **Implemented** |
-| Transactional Outbox | **Implemented** |
-| Durable Inbox / duplicate protection | **Implemented** |
-| Idempotent order creation | **Implemented** |
-| Azure Service Bus integration | **Implemented** |
-| Retry / poison-message handling | **Implemented** |
-| Dead-letter handling | **Implemented** |
-| OpenTelemetry tracing | **Implemented** |
-| Business/reliability metrics | **Implemented** |
-| Application Insights / Azure Monitor | **Implemented** |
-| Workload Identity / Azure RBAC | **Implemented** |
-| Private Azure connectivity | **Implemented in reference architecture** |
-| Terraform infrastructure | **Implemented** |
-| Helm / Kubernetes deployment | **Implemented** |
-| Container/Kubernetes hardening | **Implemented** |
-| Inventory | **Planned** |
-| Payment | **Planned** |
-| Fulfillment | **Planned** |
-| Saga orchestration / compensation | **Planned** |
-| Multi-node / multi-zone AKS | **Production extension** |
-| HPA / cluster autoscaling | **Production extension** |
-| PostgreSQL HA | **Production extension** |
+  Capability                                      Status
+  ----------------------------------------------- --------------------------
+  Order domain and API                            **Implemented**
+  PostgreSQL persistence                          **Implemented**
+  Transactional Outbox                            **Implemented**
+  Durable Inbox / duplicate protection            **Implemented**
+  Idempotent order creation                       **Implemented**
+  Azure Service Bus                               **Implemented**
+  Retry / poison-message / dead-letter handling   **Implemented**
+  Entra ID authentication                         **Implemented**
+  Tenant-aware authorization                      **Implemented**
+  Workload Identity / Azure RBAC                  **Implemented**
+  OpenTelemetry tracing                           **Implemented**
+  Business / reliability metrics                  **Implemented**
+  Terraform infrastructure                        **Implemented**
+  Helm / Kubernetes deployment                    **Implemented**
+  Container / Kubernetes hardening                **Implemented**
+  Inventory                                       **Planned**
+  Payment                                         **Planned**
+  Fulfillment                                     **Planned**
+  Saga orchestration / compensation               **Planned**
+  Multi-node / multi-zone AKS                     **Production extension**
+  HPA / cluster autoscaling                       **Production extension**
+  PostgreSQL HA                                   **Production extension**
 
-This table is the authoritative distinction between **implemented functionality**, **planned business capabilities**, and **production infrastructure extensions**.
-
----
+------------------------------------------------------------------------
 
 ## 2. What is the architecture?
 
-The application is implemented in **C# / .NET** using explicit **Domain, Application, Infrastructure and API** boundaries.
+The application uses **Clean Architecture** with explicit boundaries:
 
-### Application architecture
+**Domain → Application → Infrastructure → API**
 
-```text
-Client
-  |
-  v
-ASP.NET Core API
-  |
-  +--> Authentication / Authorization
-  +--> Tenant Context
-  |
-  v
-Application + Domain
-  |
-  +--------------------------+
-  |                          |
-  v                          v
-PostgreSQL             Transactional Outbox
-  |                          |
-  +-- Orders                 v
-  +-- Idempotency      Outbox Publisher
-  +-- Inbox                  |
-  +-- Outbox                 v
-                       Azure Service Bus
-                             |
-                             v
-                       Message Processor
-                             |
-                       Inbox / deduplication
-                       Dead-letter handling
-```
+-   **Domain:** core business model and rules
+-   **Application:** use cases and abstractions
+-   **Infrastructure:** PostgreSQL, Azure Service Bus and external
+    concerns
+-   **API:** HTTP delivery/interface layer
+-   **Architecture tests:** automatically verify dependency rules
 
-Business state and event-publication intent are committed through the transactional Outbox. The Outbox publisher later sends the event to Azure Service Bus while preserving trace context across the asynchronous boundary.
+### Reliable messaging
 
-Consumers use durable Inbox/idempotency state to prevent duplicate delivery from causing duplicate business actions.
+The central consistency problem is:
 
-### Azure architecture
+> **What happens if PostgreSQL succeeds but Azure Service Bus fails?**
+
+EuroTrade Cloud addresses this using the **Transactional Outbox
+pattern**.
+
+The **Order and Outbox event are persisted in the same PostgreSQL
+transaction**. Once that transaction commits, the Outbox publisher sends
+the event to Azure Service Bus.
+
+If publication fails, the durable Outbox record remains available for
+retry. This avoids the classic dual-write inconsistency where an order
+is committed but its event is lost.
+
+### At-least-once delivery and idempotency
+
+The system assumes **at-least-once delivery**, not exactly-once
+delivery.
+
+For example, a message can be published successfully and the application
+can crash before the Outbox row is marked as published. After restart,
+the same event may be published again.
+
+Consumers therefore use **durable Inbox/idempotency state** so duplicate
+delivery does not cause the business operation to execute twice.
+
+### Azure and deployment
 
 The reference architecture uses:
 
-- **Compute:** Azure Kubernetes Service
-- **Messaging:** Azure Service Bus
-- **Database:** Azure Database for PostgreSQL
-- **Secrets:** Azure Key Vault
-- **Identity:** Microsoft Entra ID + Workload Identity
-- **Networking:** VNet, Private Endpoints and Private DNS
-- **Registry:** Azure Container Registry
-- **Observability:** OpenTelemetry + Application Insights / Azure Monitor
-- **Infrastructure:** Terraform
-- **Deployment:** Helm / GitHub Actions
+-   **AKS** --- container orchestration and deployment target
+-   **PostgreSQL** --- transactional persistence
+-   **Azure Service Bus** --- asynchronous business messaging
+-   **Terraform** --- Azure infrastructure provisioning
+-   **Helm** --- Kubernetes application packaging and configuration
+-   **Microsoft Entra ID** --- authentication
+-   **Workload Identity** --- Azure authentication without long-lived
+    application secrets
+-   **Azure Key Vault / RBAC** --- secret management and least-privilege
+    access
+-   **OpenTelemetry** --- distributed tracing and application
+    observability
 
-The canonical Kubernetes configuration is maintained under:
+The canonical Kubernetes configuration is maintained under
+`deploy/helm/eurotrade/`.
 
-```text
-deploy/helm/eurotrade/
-├── Chart.yaml
-├── values.yaml
-└── templates/
-    ├── deployment.yaml
-    ├── pdb.yaml
-    ├── service.yaml
-    └── serviceaccount.yaml
-```
-
-Generated Helm manifests and cluster-exported Kubernetes state are not maintained as deployment sources.
-
----
+------------------------------------------------------------------------
 
 ## 3. What senior engineering problems were solved?
 
-The project focuses on engineering concerns beyond basic CRUD functionality.
-
 ### Transactional consistency
 
-Creating database state and publishing an event are two separate operations.
+Database persistence and broker publication are separate operations. The
+Transactional Outbox makes the publication intent part of the same
+transaction as the business state.
 
-EuroTrade Cloud addresses this dual-write problem with a **transactional Outbox**, ensuring that committed business changes have a corresponding durable publication intent.
+**Key principle:** the Order and Outbox event are committed together.
 
-### Idempotency and duplicate processing
+### At-least-once messaging
 
-At-least-once delivery means duplicate operations must be expected rather than treated as exceptional.
+Reliable publication does not imply exactly-once processing.
 
-The project uses:
+The implementation therefore combines:
 
-- Durable Inbox state
-- Idempotent order creation
-- Duplicate detection
-- PostgreSQL concurrency protection
+-   Transactional Outbox
+-   Durable Inbox
+-   Idempotent order creation
+-   Duplicate detection
+-   PostgreSQL concurrency protection
 
-Critical concurrency behavior is tested against PostgreSQL using **Testcontainers** rather than inferred from SQLite behavior.
+Critical concurrency scenarios are tested against PostgreSQL using
+Testcontainers.
 
-### Failure handling
+### Failure and concurrency handling
 
-Implemented reliability behavior includes:
+The implementation considers failure paths such as:
 
-- Outbox retries
-- Retry scheduling
-- Poison-message handling
-- Dead-letter handling
-- Transaction rollback verification
-- Cancellation propagation
-- Concurrent-processing protection
+-   PostgreSQL failure
+-   Azure Service Bus publication failure
+-   Application crashes
+-   Duplicate message delivery
+-   Concurrent Outbox publishers
+-   Retry scheduling
+-   Poison messages
+-   Dead-letter handling
+-   Transaction rollback
+-   Cancellation propagation
 
-Cross-service Saga compensation remains a **planned business milestone**.
+This is deliberately broader than testing only the happy path.
 
-### Multi-tenancy and authorization
+### Security boundaries
 
-Tenant identity is propagated through the authenticated application context.
+The project treats authentication and authorization as separate
+concerns:
 
-Order access is tenant-aware, with authorization enforced at the API/application boundary to prevent one tenant from accessing another tenant's resources.
+-   **Authentication:** Who are you?
+-   **Authorization:** Can you perform this operation?
+-   **Tenant authorization:** Can you access this tenant's resource?
 
-The implementation distinguishes authentication, scopes/permissions and tenant ownership rather than treating them as a single security check.
+Tenant-aware resource access is enforced using trusted application
+context rather than accepting tenant ownership from untrusted request
+data.
 
-### Cloud identity and least privilege
+Azure workloads use **Entra ID, RBAC and Workload Identity** instead of
+embedded long-lived cloud credentials.
 
-Azure workloads use:
+The application container also runs as a **non-root user**, while
+Kubernetes applies restrictions including `runAsNonRoot`,
+`allowPrivilegeEscalation: false`, a read-only root filesystem, dropped
+Linux capabilities and the default seccomp profile.
 
-- Microsoft Entra ID
-- Azure RBAC
-- Workload Identity
-- Azure Key Vault
-- Private connectivity
+### Observability
 
-The application avoids embedding Azure credentials and does not require unnecessary Azure management privileges simply to expose infrastructure telemetry.
+OpenTelemetry provides distributed tracing across synchronous and
+asynchronous boundaries.
 
-### Container and Kubernetes security
+Trace context captured during order creation is preserved through the
+Outbox and restored during later publication, allowing an HTTP order
+request to be correlated with downstream asynchronous processing.
 
-The application container explicitly runs as a **non-root user**.
+Application metrics include:
 
-The Kubernetes deployment applies runtime restrictions including:
+  -----------------------------------------------------------------------
+  Metric                              Purpose
+  ----------------------------------- -----------------------------------
+  `orders_created_total`              Successfully created orders
 
-```yaml
-runAsNonRoot: true
+  `outbox_pending_messages`           Current unpublished Outbox backlog
 
-allowPrivilegeEscalation: false
-readOnlyRootFilesystem: true
+  `outbox_publish_failures_total`     Failed publication attempts
 
-capabilities:
-  drop:
-    - ALL
+  `message_processing_duration`       Message-processing duration
 
-seccompProfile:
-  type: RuntimeDefault
-```
+  `inbox_duplicate_messages_total`    Duplicate messages detected
 
-This reduces privileges at both the Azure identity and Linux container-runtime layers.
+  `dead_lettered_messages_total`      Messages dead-lettered by
+                                      application processing
+  -----------------------------------------------------------------------
 
-### Observability across asynchronous boundaries
+Azure Monitor / Service Bus provides infrastructure-owned telemetry such
+as queue depth, DLQ depth, broker errors and throttling.
 
-Trace context is preserved across the transactional Outbox boundary:
+Common telemetry resource attributes include `service.name`,
+`service.version` and `deployment.environment.name`.
 
-```text
-HTTP Request
-     |
-     v
-Create Order
-     |
-     +--> Order + Outbox committed
-                    |
-                    | trace context stored
-                    v
-              Outbox Publisher
-                    |
-                    | trace context restored
-                    v
-             Azure Service Bus
-                    |
-                    v
-             Message Processor
-```
-
-The application also exposes OpenTelemetry business and reliability metrics:
-
-| Metric | Purpose |
-| --- | --- |
-| `orders_created_total` | Successfully created orders |
-| `outbox_pending_messages` | Current unpublished Outbox backlog |
-| `outbox_publish_failures_total` | Failed publication attempts |
-| `message_processing_duration` | Message-processing duration |
-| `inbox_duplicate_messages_total` | Duplicate messages detected |
-| `dead_lettered_messages_total` | Messages dead-lettered by application processing |
-
-Azure Service Bus / Azure Monitor remains responsible for infrastructure-owned telemetry such as **queue depth, DLQ depth, broker errors and throttling**.
-
-Common OpenTelemetry resource attributes include:
-
-- `service.name`
-- `service.version`
-- `deployment.environment.name`
-
-This allows traces, logs and metrics to be correlated by service, application version and environment.
-
-### Testing failure paths
-
-The solution includes:
-
-- Domain unit tests
-- Application unit tests
-- Architecture tests
-- Integration tests
-- PostgreSQL/Testcontainers tests
-- End-to-end API tests
-
-Coverage includes authorization boundaries, tenant isolation, idempotency, concurrency, Inbox behavior, Outbox retries, rollback, cancellation and poison-message handling.
-
-The objective is to test not only successful execution but also the failure modes expected in a distributed system.
-
----
+------------------------------------------------------------------------
 
 ## 4. How can I run or inspect the demo?
 
 ### Prerequisites
 
-- .NET 10 SDK
-- Git
-- Docker Desktop
-- Helm for Kubernetes chart validation
-- Azure CLI when testing Azure integrations
+-   .NET 10 SDK
+-   Git
+-   Docker Desktop
+-   Helm for Kubernetes chart validation
+-   Azure CLI when testing Azure integrations
 
-### Clone
+### Clone and build
 
-```bash
+``` bash
 git clone https://github.com/armsah/EuroTrade-Cloud.git
 cd EuroTrade-Cloud
-```
-
-### Build
-
-```bash
 dotnet build
 ```
 
-### Run the tests
+### Run the automated tests
 
-```bash
+``` bash
 dotnet test
 ```
 
-The automated test suite exercises domain, application, architecture, PostgreSQL integration and end-to-end API behavior.
+The suite covers domain, application, architecture, PostgreSQL
+integration and end-to-end API behavior, including authorization, tenant
+isolation, idempotency, concurrency, Outbox retries, rollback and
+failure handling.
 
 ### Inspect the Kubernetes deployment
 
-Validate the Helm chart:
-
-```bash
+``` bash
 helm lint ./deploy/helm/eurotrade
-```
-
-Render the Kubernetes configuration locally:
-
-```bash
 helm template eurotrade ./deploy/helm/eurotrade
 ```
 
 ### Inspect the Azure implementation
 
-The Azure environment is defined through Terraform and Helm.
+Terraform and Helm define the Azure reference environment, including
+AKS, Azure Service Bus, PostgreSQL, Key Vault, Azure Container Registry,
+private networking and Azure Monitor / Application Insights.
 
-When provisioned, the reference environment includes:
+The Azure environment is intended to be provisioned for demonstrations
+and destroyed afterward to control recurring cloud costs.
 
-- AKS
-- Azure Service Bus
-- Azure Database for PostgreSQL
-- Azure Key Vault
-- Azure Container Registry
-- VNet / Private Endpoints / Private DNS
-- Application Insights
-- Azure Monitor / Log Analytics
+------------------------------------------------------------------------
 
-Azure resources are **not intended to remain running continuously for the portfolio demo**. The environment can be provisioned for demonstration and destroyed afterward to control recurring cloud costs.
+## Current limitations and next milestones
 
----
+The current project deliberately concentrates on getting the
+**order-processing, messaging, security, observability and
+infrastructure foundation** correct first.
 
-## Availability and production topology
+The next business capabilities are:
 
-The provisioned Azure environment is intentionally a **cost-optimized development/demo configuration**, not a claim of infrastructure-level high availability.
+1.  Inventory reservation
+2.  Payment processing/simulation
+3.  Fulfillment workflow
+4.  Explicit Saga state
+5.  Compensation behavior
+6.  Workflow-specific failure testing
+7.  Cross-service observability
 
-The current workload demonstrates:
+These capabilities are **planned and are not represented as completed
+functionality**.
 
-- Multiple API replicas
-- Liveness and readiness probes
-- CPU and memory requests/limits
-- Rolling deployments
-- PodDisruptionBudget
-- Stateless API containers
-- Durable messaging patterns
+The demo environment is also not presented as fully highly available. A
+continuously operated production deployment would typically add:
 
-Multiple replicas do not by themselves guarantee high availability if they run on the same AKS node.
+-   Multiple AKS worker nodes
+-   Availability-zone distribution where required
+-   Horizontal Pod Autoscaler
+-   Cluster Autoscaler
+-   Topology spread constraints or pod anti-affinity
+-   Production PostgreSQL HA and tested recovery
+-   Operational SLOs, alerts and capacity testing
 
-A continuously operated production deployment would typically add:
-
-- Multiple AKS worker nodes
-- Availability-zone distribution where required
-- Cluster Autoscaler
-- Horizontal Pod Autoscaler
-- Topology spread constraints or pod anti-affinity
-- PostgreSQL HA and tested recovery
-- Capacity and disruption testing
-- Operational SLOs and alerting
-
-These resources are intentionally not provisioned solely for the portfolio demonstration.
-
----
-
-## Roadmap
-
-The next business milestone is to extend the reliable order-processing foundation with:
-
-1. Inventory reservation
-2. Payment processing/simulation
-3. Fulfillment workflow
-4. Explicit Saga state
-5. Compensation behavior
-6. Workflow-specific failure tests
-7. Cross-service observability
-
-These capabilities are **planned and are not represented as completed functionality**.
-
-Production infrastructure improvements such as multi-zone AKS, autoscaling and PostgreSQL HA are separate from the cost-optimized demo environment.
-
----
+------------------------------------------------------------------------
 
 ## Engineering focus
 
-EuroTrade Cloud is intended to demonstrate engineering judgment rather than simply the number of technologies used.
+EuroTrade Cloud is intended to demonstrate engineering judgment rather
+than simply the number of technologies used.
 
-The main areas are:
+The main lessons are:
 
-- **Application engineering:** domain-oriented .NET design and explicit boundaries
-- **Distributed systems:** Outbox, Inbox, idempotency, retries and dead-letter handling
-- **Data consistency:** PostgreSQL transactions, concurrency and rollback
-- **Security:** Entra ID, tenant authorization, RBAC, Workload Identity and hardened containers
-- **Cloud engineering:** AKS, Service Bus, PostgreSQL, Terraform and Helm
-- **Observability:** OpenTelemetry traces, logs and metrics
-- **Testing:** unit, architecture, integration, PostgreSQL and end-to-end testing
+1.  **Transactional consistency** --- coordinate business state and
+    messaging with the Outbox pattern.
+2.  **At-least-once messaging** --- expect duplicates and design
+    consumers to be idempotent.
+3.  **Security boundaries** --- distinguish authentication,
+    authorization and tenant ownership.
+4.  **Concurrency and failures** --- design and test for crashes,
+    retries, duplicates and concurrent processing.
+5.  **Infrastructure and operations** --- use cloud identity,
+    reproducible infrastructure, hardened containers and end-to-end
+    observability.
 
-The repository deliberately distinguishes between **what is implemented today**, **what is planned next**, and **what would be added for a continuously operated production environment**.
+> **The goal is not to claim that every enterprise workflow is complete.
+> The goal is to demonstrate a reliable foundation and make the boundary
+> between implemented functionality, planned capabilities and production
+> extensions explicit.**
