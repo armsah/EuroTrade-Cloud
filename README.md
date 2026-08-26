@@ -222,38 +222,28 @@ Linux capabilities and the default seccomp profile.
 
 ### Observability
 
-OpenTelemetry provides distributed tracing across synchronous and
-asynchronous boundaries.
+OpenTelemetry provides distributed tracing across synchronous and asynchronous boundaries.
 
-Trace context captured during order creation is preserved through the
-Outbox and restored during later publication, allowing an HTTP order
-request to be correlated with downstream asynchronous processing.
+Trace context captured during order creation is preserved through the Outbox and restored during later publication, allowing an HTTP order request to be correlated with downstream asynchronous processing.
 
 Application metrics include:
 
-  -----------------------------------------------------------------------
-  Metric                              Purpose
-  ----------------------------------- -----------------------------------
-  `orders_created_total`              Successfully created orders
+| Metric | Purpose |
+| --- | --- |
+| `orders_created_total` | Successfully created orders |
+| `outbox_pending_messages` | Current unpublished Outbox backlog |
+| `outbox_publish_failures_total` | Failed publication attempts |
+| `message_processing_duration` | Message-processing duration |
+| `inbox_duplicate_messages_total` | Duplicate messages detected |
+| `dead_lettered_messages_total` | Messages dead-lettered by application processing |
 
-  `outbox_pending_messages`           Current unpublished Outbox backlog
+Azure Monitor / Service Bus provides infrastructure-owned telemetry such as queue depth, DLQ depth, broker errors and throttling.
 
-  `outbox_publish_failures_total`     Failed publication attempts
+Common telemetry resource attributes include:
 
-  `message_processing_duration`       Message-processing duration
-
-  `inbox_duplicate_messages_total`    Duplicate messages detected
-
-  `dead_lettered_messages_total`      Messages dead-lettered by
-                                      application processing
-  -----------------------------------------------------------------------
-
-Azure Monitor / Service Bus provides infrastructure-owned telemetry such
-as queue depth, DLQ depth, broker errors and throttling.
-
-Common telemetry resource attributes include `service.name`,
-`service.version` and `deployment.environment.name`.
-
+- `service.name`
+- `service.version`
+- `deployment.environment.name`
 ------------------------------------------------------------------------
 
 ## 4. How can I run or inspect the demo?
