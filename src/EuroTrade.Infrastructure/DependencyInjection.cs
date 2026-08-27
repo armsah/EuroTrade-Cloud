@@ -42,6 +42,7 @@ public static class DependencyInjection
 
         services.AddScoped<IOrderRepository, EfOrderRepository>();
         services.AddScoped<IOrderWriter, EfOrderWriter>();
+        services.AddSingleton<InboxMessageStore>();
 
         var serviceBusNamespace =
             configuration[
@@ -60,7 +61,6 @@ public static class DependencyInjection
             string.IsNullOrWhiteSpace(
                 queueName))
         {
-            services.AddSingleton<InboxMessageStore>();
             services.AddSingleton<InMemoryEventBus>();
 
             services.AddSingleton<IEventBus>(

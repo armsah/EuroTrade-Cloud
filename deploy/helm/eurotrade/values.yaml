@@ -35,6 +35,7 @@ podSecurityContext:
     type: RuntimeDefault
 
 containerSecurityContext:
+  runAsUser: 1654
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
   runAsNonRoot: true
@@ -64,7 +65,7 @@ serviceAccount:
   automount: true
 
   annotations:
-    azureWorkloadIdentityClientId: "fb58f35c-04a3-49ca-9490-d412fab74380"
+    azureWorkloadIdentityClientId: "0da8274a-6255-4cb4-be39-4188c3c1581c"
 
 env:
   ASPNETCORE_ENVIRONMENT: Production
