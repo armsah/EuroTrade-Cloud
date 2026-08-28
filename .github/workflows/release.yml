@@ -42,11 +42,43 @@ jobs:
           --configuration Release
           --warnaserror
 
+      - name: Start PostgreSQL
+        run: docker compose up -d postgres
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if docker compose exec -T postgres pg_isready -U eurotrade -d eurotrade; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+          echo "PostgreSQL did not become ready"
+          docker compose logs postgres
+          exit 1
+
+      - name: Apply database migrations
+        env:
+          ConnectionStrings__OrdersDb: Host=localhost;Port=5432;Database=eurotrade;Username=eurotrade;Password=eurotrade
+        run: >
+          dotnet ef database update
+          --project src/EuroTrade.Infrastructure/EuroTrade.Infrastructure.csproj
+          --startup-project src/EuroTrade.Api/EuroTrade.Api.csproj
+          --configuration Release
+
       - name: Run tests
         run: >
           dotnet test EuroTrade-Cloud.sln
           --no-build
           --configuration Release
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: docker compose down --volumes
 
       - name: Publish API
         run: >
