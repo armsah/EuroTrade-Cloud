@@ -1,0 +1,3 @@
+v1.0.0          EuroTrade Cloud v1.0.0
+v1.0.1          EuroTrade Cloud v1.0.1
+v1.0.2          EuroTrade Cloud v1.0.2
