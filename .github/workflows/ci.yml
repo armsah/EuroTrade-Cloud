@@ -8,9 +8,23 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
 jobs:
   build-and-test:
+    name: Build and test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -24,11 +38,15 @@ jobs:
       - name: Restore .NET tools
         run: dotnet tool restore
 
-      - name: Restore
+      - name: Restore dependencies
         run: dotnet restore EuroTrade-Cloud.sln
 
       - name: Build
-        run: dotnet build EuroTrade-Cloud.sln --no-restore --configuration Release
+        run: >
+          dotnet build EuroTrade-Cloud.sln
+          --no-restore
+          --configuration Release
+          --warnaserror
 
       - name: Start PostgreSQL
         run: docker compose up -d postgres
@@ -58,9 +76,23 @@ jobs:
           --startup-project src/EuroTrade.Api/EuroTrade.Api.csproj
           --configuration Release
 
-      - name: Test
-        run: dotnet test EuroTrade-Cloud.sln --no-build --configuration Release
+      - name: Run tests
+        run: >
+          dotnet test EuroTrade-Cloud.sln
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory ./TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Stop PostgreSQL
         if: always()
-        run: docker compose down
+        run: docker compose down --volumes
