@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore EuroTrade-Cloud.sln
+
+      - name: Build
+        run: >
+          dotnet build EuroTrade-Cloud.sln
+          --no-restore
+          --configuration Release
+          --warnaserror
+
+      - name: Run tests
+        run: >
+          dotnet test EuroTrade-Cloud.sln
+          --no-build
+          --configuration Release
+
+      - name: Publish API
+        run: >
+          dotnet publish src/EuroTrade.Api/EuroTrade.Api.csproj
+          --configuration Release
+          --no-build
+          --output ./artifacts/eurotrade-api
+
+      - name: Create release archive
+        run: |
+          cd artifacts
+          tar -czf eurotrade-api-${GITHUB_REF_NAME}-linux-x64.tar.gz eurotrade-api
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          path: ./artifacts/eurotrade-api
+          format: spdx-json
+          output-file: ./artifacts/eurotrade-api-${{ github.ref_name }}.spdx.json
+          upload-artifact: false
+
+      - name: Generate SHA256 checksums
+        working-directory: artifacts
+        run: |
+          sha256sum eurotrade-api-${GITHUB_REF_NAME}-linux-x64.tar.gz > SHA256SUMS
+          sha256sum eurotrade-api-${GITHUB_REF_NAME}.spdx.json >> SHA256SUMS
+
+      - name: Attest release archive
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: artifacts/eurotrade-api-${{ github.ref_name }}-linux-x64.tar.gz
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@v3
+        with:
+          subject-path: artifacts/eurotrade-api-${{ github.ref_name }}-linux-x64.tar.gz
+          sbom-path: artifacts/eurotrade-api-${{ github.ref_name }}.spdx.json
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.ref_name }}
+          path: |
+            artifacts/eurotrade-api-${{ github.ref_name }}-linux-x64.tar.gz
+            artifacts/eurotrade-api-${{ github.ref_name }}.spdx.json
+            artifacts/SHA256SUMS
+          retention-days: 30
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            artifacts/eurotrade-api-${GITHUB_REF_NAME}-linux-x64.tar.gz \
+            artifacts/eurotrade-api-${GITHUB_REF_NAME}.spdx.json \
+            artifacts/SHA256SUMS \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag
